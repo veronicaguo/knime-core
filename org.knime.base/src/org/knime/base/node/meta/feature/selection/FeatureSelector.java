@@ -49,13 +49,14 @@
 package org.knime.base.node.meta.feature.selection;
 
 import java.util.Collection;
-import java.util.Collections;
+import java.util.List;
 
 import org.knime.core.data.DataCell;
 import org.knime.core.data.DataColumnSpec;
 import org.knime.core.data.DataColumnSpecCreator;
 import org.knime.core.data.DataRow;
 import org.knime.core.data.DataTableSpec;
+import org.knime.core.data.RowKey;
 import org.knime.core.data.def.DefaultRow;
 import org.knime.core.data.def.DoubleCell;
 import org.knime.core.data.def.IntCell;
@@ -83,11 +84,11 @@ public class FeatureSelector {
 
     private double m_lastScore;
 
-//    private boolean m_shouldAddRowToResultTable;
-
     private final FeatureSelectionModel m_selectionModel;
 
     private BufferedDataContainer m_resultTableContainer;
+
+    private long m_rowIdx;
 
     /**
      * @param strategy Search strategy for this search (e.g. forward selection)
@@ -97,6 +98,7 @@ public class FeatureSelector {
         m_strategy = strategy;
         m_colHandler = columnHandler;
         m_selectionModel = new FeatureSelectionModel(columnHandler);
+        m_rowIdx = 0;
     }
 
     /**
@@ -122,6 +124,8 @@ public class FeatureSelector {
                 m_resultTableContainer.addRowToTable(getRowForResultTable());
             }
         }
+
+        m_strategy.finishRound();
     }
 
     /**
@@ -153,6 +157,7 @@ public class FeatureSelector {
 
     /**
      * Sets the name of the score for later use in the FeatureSelectionFilter node.
+     *
      * @param scoreName name of the score variable.
      */
     public void setScoreName(final String scoreName) {
@@ -192,19 +197,27 @@ public class FeatureSelector {
         final int featureLevelSize = m_strategy.getFeatureLevel().size();
         cells[0] = new IntCell(featureLevelSize);
         cells[1] = new DoubleCell(m_lastScore);
-        final int changedFeature = m_strategy.getLastBestFeature();
-        if (changedFeature == -1) {
+        final List<Integer> changedFeature = m_strategy.getLastChange();
+        if (changedFeature.contains(-1) || changedFeature.isEmpty()) {
             cells[2] = new StringCell("");
         } else {
-            cells[2] = new StringCell(m_colHandler.getColumnNamesFor(Collections.singleton(changedFeature)).iterator().next());
+            cells[2] = new StringCell(String.join(",", m_colHandler.getColumnNamesFor(changedFeature)));
         }
-        final String rowId = featureLevelSize == m_colHandler.getAvailableFeatures().size() ? "All" : "" + featureLevelSize;
-        return new DefaultRow(rowId, cells);
+
+        final RowKey rowKey;
+        if (m_strategy instanceof AbstractSequentialFeatureSelectionStrategy) {
+            final String rowId =
+                    featureLevelSize == m_colHandler.getAvailableFeatures().size() ? "All" : "" + featureLevelSize;
+            rowKey = new RowKey(rowId);
+        } else {
+            rowKey = RowKey.createRowKey(m_rowIdx++);
+        }
+        return new DefaultRow(rowKey, cells);
     }
 
     /**
      * Returns the tables for the next search round.
-     * To be used by the loop start nod.
+     * To be used by the loop start node.
      *
      * @param exec {@link ExecutionContext} of the loop start node.
      * @param inTables The input tables of the loop start node.
@@ -233,6 +246,10 @@ public class FeatureSelector {
             return "";
         }
         return m_colHandler.getColumnNameFor(m_strategy.getCurrentFeature());
+    }
+
+    public void onDispose() {
+        m_strategy.onDispose();
     }
 
 }

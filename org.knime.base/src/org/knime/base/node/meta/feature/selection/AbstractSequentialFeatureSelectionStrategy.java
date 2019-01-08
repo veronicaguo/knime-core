@@ -48,6 +48,7 @@
  */
 package org.knime.base.node.meta.feature.selection;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
@@ -56,7 +57,7 @@ import java.util.List;
  *
  * @author Adrian Nembach, KNIME.com
  */
-public abstract class AbstractFeatureSelectionStrategy implements FeatureSelectionStrategy {
+public abstract class AbstractSequentialFeatureSelectionStrategy implements FeatureSelectionStrategy {
 
     private final int m_subsetSize;
 
@@ -77,7 +78,7 @@ public abstract class AbstractFeatureSelectionStrategy implements FeatureSelecti
      * @param features ids of the features.
      *
      */
-    public AbstractFeatureSelectionStrategy(final int subSetSize, final List<Integer> features) {
+    public AbstractSequentialFeatureSelectionStrategy(final int subSetSize, final List<Integer> features) {
         m_subsetSize = subSetSize;
         m_featureColumns = features;
     }
@@ -171,15 +172,6 @@ public abstract class AbstractFeatureSelectionStrategy implements FeatureSelecti
         if (newBestScore(score)) {
             m_currentBestFeature = getCurrentFeature();
         }
-
-//        if (reachedEndOfRound()) {
-//            handleBestFeature(m_currentBestFeature);
-//            List<Integer> included = getIncluded();
-//            m_shouldStop = included.size() == m_subsetSize || reachedEndOfSearch();
-//        } else {
-//            nextFeature();
-//        }
-
     }
 
     /**
@@ -189,7 +181,6 @@ public abstract class AbstractFeatureSelectionStrategy implements FeatureSelecti
     public boolean continueLoop() {
         return !m_shouldStop;
     }
-
 
     /**
      * {@inheritDoc}
@@ -223,8 +214,10 @@ public abstract class AbstractFeatureSelectionStrategy implements FeatureSelecti
      * {@inheritDoc}
      */
     @Override
-    public Integer getLastBestFeature() {
-        return m_lastBestFeature;
+    public List<Integer> getLastChange() {
+        List<Integer> list = new ArrayList<>();
+        list.add(m_lastBestFeature);
+        return list;
     }
 
     /**
@@ -245,4 +238,20 @@ public abstract class AbstractFeatureSelectionStrategy implements FeatureSelecti
      * @return the number of iterations the strategy needs to reach <b>subsetSize</b>
      */
     protected abstract int calcNumIterations(int subsetSize, int numFeatures);
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void onDispose() {
+        // nothing to do
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void finishRound() {
+        // nothing to do
+    }
 }
