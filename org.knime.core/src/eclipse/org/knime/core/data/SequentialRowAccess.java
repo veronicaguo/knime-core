@@ -1,5 +1,6 @@
 /*
  * ------------------------------------------------------------------------
+ *
  *  Copyright by KNIME AG, Zurich, Switzerland
  *  Website: http://www.knime.com; Email: contact@knime.com
  *
@@ -40,36 +41,29 @@
  *  propagated with or for interoperation with KNIME.  The owner of a Node
  *  may freely choose the license terms applicable to such Node, including
  *  when such Node is propagated with or for interoperation with KNIME.
- * ------------------------------------------------------------------------
+ * ---------------------------------------------------------------------
+ *
+ * History
+ *   18 Feb 2019 (albrecht): created
  */
 package org.knime.core.data;
 
-import org.knime.core.data.RowIteratorBuilder.DefaultRowIteratorBuilder;
-
 /**
- * Most general data interface in table structure with a fixed number of columns
- * and iterable rows (no random access).
  *
- * <p>
- * Each <code>DataTable</code> is a read-only container of {@link DataRow}
- * elements which are returned by the {@link RowIterator}. Each row must have
- * the same number of {@link DataCell} elements (columns), is read-only, and
- * must provide a unique row identifier. A table also contains a
- * {@link DataTableSpec} member which provides information about the structure
- * of the table. The {@link DataTableSpec} consists of {@link DataColumnSpec}s
- * which contain information about the column, e.g. name, type, and possible
- * values etc.
- *
- * @author Thomas Gabriel, University of Konstanz
- *
- * @see DataCell
- * @see DataRow
- * @see RowIterator
+ * @author Christian Albrecht, Martin Horn, KNIME GmbH, Konstanz, Germany
+ * @since 3.8
  */
-public interface DataTable extends SequentialRowAccessTable {
+public interface SequentialRowAccess extends RowAccess, Iterable<DataRow> {
 
-    /* convenience interface since all methods are already defined in SequentialRowAccessTable. Needs to be there for
-     * backwards compatibility. */
+    /**
+     * Returns a row iterator which returns each row one-by-one from the table.
+     *
+     * @return row iterator
+     *
+     * @see org.knime.core.data.DataRow
+     */
+    @Override
+    RowIterator iterator();
 
     /**
      * Returns a {@link RowIteratorBuilder} that can be used to assemble more complex {@link RowIterator} that only
@@ -77,11 +71,7 @@ public interface DataTable extends SequentialRowAccessTable {
      *
      * @return a {@link RowIteratorBuilder} that can be used to assemble complex {@link RowIterator}s
      *
-     * @since 3.7
      */
-    @Override
-    default RowIteratorBuilder<? extends RowIterator> iteratorBuilder() {
-        return new DefaultRowIteratorBuilder<RowIterator>(() -> iterator(), getDataTableSpec());
-    }
+    RowIteratorBuilder<? extends RowIterator> iteratorBuilder();
 
 }

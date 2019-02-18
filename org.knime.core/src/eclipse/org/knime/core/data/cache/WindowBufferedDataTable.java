@@ -1,5 +1,6 @@
 /*
  * ------------------------------------------------------------------------
+ *
  *  Copyright by KNIME AG, Zurich, Switzerland
  *  Website: http://www.knime.com; Email: contact@knime.com
  *
@@ -40,48 +41,59 @@
  *  propagated with or for interoperation with KNIME.  The owner of a Node
  *  may freely choose the license terms applicable to such Node, including
  *  when such Node is propagated with or for interoperation with KNIME.
- * ------------------------------------------------------------------------
+ * ---------------------------------------------------------------------
+ *
+ * History
+ *   18 Feb 2019 (albrecht): created
  */
-package org.knime.core.data;
+package org.knime.core.data.cache;
 
-import org.knime.core.data.RowIteratorBuilder.DefaultRowIteratorBuilder;
+import org.knime.core.data.ChunkedRowAccessTable;
+import org.knime.core.data.DataRow;
+import org.knime.core.data.DataTable;
+import org.knime.core.data.DataTableSpec;
+import org.knime.core.data.SingleRowAccessTable;
 
 /**
- * Most general data interface in table structure with a fixed number of columns
- * and iterable rows (no random access).
  *
- * <p>
- * Each <code>DataTable</code> is a read-only container of {@link DataRow}
- * elements which are returned by the {@link RowIterator}. Each row must have
- * the same number of {@link DataCell} elements (columns), is read-only, and
- * must provide a unique row identifier. A table also contains a
- * {@link DataTableSpec} member which provides information about the structure
- * of the table. The {@link DataTableSpec} consists of {@link DataColumnSpec}s
- * which contain information about the column, e.g. name, type, and possible
- * values etc.
- *
- * @author Thomas Gabriel, University of Konstanz
- *
- * @see DataCell
- * @see DataRow
- * @see RowIterator
+ * @author Christian Albrecht, KNIME GmbH, Konstanz, Germany
+ * @since 3.8
  */
-public interface DataTable extends SequentialRowAccessTable {
+public class WindowBufferedDataTable implements SingleRowAccessTable, ChunkedRowAccessTable {
 
-    /* convenience interface since all methods are already defined in SequentialRowAccessTable. Needs to be there for
-     * backwards compatibility. */
+    private final DataTable m_table;
 
     /**
-     * Returns a {@link RowIteratorBuilder} that can be used to assemble more complex {@link RowIterator} that only
-     * iterate over parts of a table.
      *
-     * @return a {@link RowIteratorBuilder} that can be used to assemble complex {@link RowIterator}s
-     *
-     * @since 3.7
+     */
+    public WindowBufferedDataTable(final DataTable table) {
+        m_table = table;
+    }
+
+    /**
+     * {@inheritDoc}
      */
     @Override
-    default RowIteratorBuilder<? extends RowIterator> iteratorBuilder() {
-        return new DefaultRowIteratorBuilder<RowIterator>(() -> iterator(), getDataTableSpec());
+    public DataTableSpec getDataTableSpec() {
+        return m_table.getDataTableSpec();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public DataRow getDataRow(final long index) throws IndexOutOfBoundsException {
+        // TODO Auto-generated method stub
+        return null;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public DataRow[] getChunk(final long start, final long length) throws IndexOutOfBoundsException {
+        // TODO Auto-generated method stub
+        return null;
     }
 
 }

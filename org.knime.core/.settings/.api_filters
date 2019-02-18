@@ -16,6 +16,22 @@
             </message_arguments>
         </filter>
     </resource>
+    <resource path="src/eclipse/org/knime/core/data/DataTable.java" type="org.knime.core.data.DataTable">
+        <filter id="403984517">
+            <message_arguments>
+                <message_argument value="org.knime.core.data.DataTable"/>
+                <message_argument value="org.knime.core.data.SequentialRowAccess"/>
+                <message_argument value="iterator()"/>
+            </message_arguments>
+        </filter>
+        <filter id="403984517">
+            <message_arguments>
+                <message_argument value="org.knime.core.data.DataTable"/>
+                <message_argument value="org.knime.core.data.Table"/>
+                <message_argument value="getDataTableSpec()"/>
+            </message_arguments>
+        </filter>
+    </resource>
     <resource path="src/eclipse/org/knime/core/data/container/Buffer.java" type="org.knime.core.data.container.Buffer">
         <filter id="338792546">
             <message_arguments>
