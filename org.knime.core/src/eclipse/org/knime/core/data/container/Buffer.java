@@ -77,11 +77,12 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.zip.Deflater;
@@ -350,7 +351,7 @@ public class Buffer implements KNIMEStreamConstants {
         final String valTableCache = System.getProperty(envTableCache);
         String tableCache = DEF_TABLE_CACHE;
         if (valTableCache != null) {
-        	final String s = valTableCache.trim().toUpperCase();
+            final String s = valTableCache.trim().toUpperCase();
             switch (tableCache) {
                 case "LRU":
                 case "SMALL":
@@ -368,15 +369,16 @@ public class Buffer implements KNIMEStreamConstants {
     private static final BufferCache CACHE = new BufferCache();
 
     /** A thread pool for asynchronous disk I/O threads. */
-    static final ExecutorService ASYNC_EXECUTORS = Executors.newSingleThreadExecutor(new ThreadFactory() {
-        private final AtomicInteger m_threadCount = new AtomicInteger();
+    static final ScheduledExecutorService ASYNC_EXECUTORS =
+        Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
+            private final AtomicInteger m_threadCount = new AtomicInteger();
 
-        /** {@inheritDoc} */
-        @Override
-        public Thread newThread(final Runnable r) {
-            return new Thread(r, "KNIME-BackgroundTableWriter-" + m_threadCount.incrementAndGet());
-        }
-    });
+            /** {@inheritDoc} */
+            @Override
+            public Thread newThread(final Runnable r) {
+                return new Thread(r, "KNIME-BackgroundTableWriter-" + m_threadCount.incrementAndGet());
+            }
+        });
 
     /**
      * Hash used to reduce the overhead of reading a blob cell over and over again. Useful in cases where a blob is
@@ -2474,9 +2476,10 @@ public class Buffer implements KNIMEStreamConstants {
              * We'd like to flush early so that we can garbage-collect if memory becomes critical and we don't run
              * out of memory. At the same time, we'd like to flush late so that we don't interfere with I/O tasks in
              * the node generating this table. In this implementation, we flush as soon as possible once the buffer
-             * has been closed (and the node likely has terminated).
+             * has been closed (and the node likely has terminated). We delay flushing by 20s though, since in loops
+             * tables are often rapidly created and discarded and we don't want to start unnecessary write threads.
              */
-            m_asyncAddFuture = ASYNC_EXECUTORS.submit(new ASyncWriteCallable());
+            m_asyncAddFuture = ASYNC_EXECUTORS.schedule(new ASyncWriteCallable(), 20, TimeUnit.MILLISECONDS);
         }
 
         /** {@inheritDoc} */
@@ -2542,6 +2545,11 @@ public class Buffer implements KNIMEStreamConstants {
                  * everything we call in here does not interfere with other methods potentially called asynchronously on
                  * this buffer.
                  */
+
+                if (cancelFuture) {
+                    return null;
+                }
+
                 Throwable throwable = null;
                 try {
 
