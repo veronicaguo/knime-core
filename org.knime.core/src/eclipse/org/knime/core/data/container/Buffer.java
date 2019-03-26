@@ -2450,11 +2450,6 @@ public class Buffer implements KNIMEStreamConstants {
          */
         private Future<Void> m_asyncAddFuture;
 
-        /**
-         * A flag to indicate that the asynchronous write task should be cancelled.
-         */
-        private volatile boolean cancelFuture = false;
-
         /** {@inheritDoc} */
         @Override
         public void onAddRowToList(final BlobSupportDataRow row) {
@@ -2484,12 +2479,10 @@ public class Buffer implements KNIMEStreamConstants {
         public void onClear() {
             assert Thread.holdsLock(Buffer.this);
 
-            if (m_asyncAddFuture != null) {
+            if (m_asyncAddFuture != null && !m_asyncAddFuture.isDone()) {
                 /** We should cancel the asynchronous writer thread. */
-                cancelFuture = true;
-                waitForFuture(m_asyncAddFuture);
+                m_asyncAddFuture.cancel(true);
             }
-            m_asyncAddFuture = null;
         }
 
         /** {@inheritDoc} */
@@ -2498,10 +2491,9 @@ public class Buffer implements KNIMEStreamConstants {
             assert Thread.holdsLock(Buffer.this);
 
             /** We have to wait for the asynchronous writer thread. */
-            if (m_asyncAddFuture != null) {
+            if (m_asyncAddFuture != null && !m_asyncAddFuture.isDone()) {
                 waitForFuture(m_asyncAddFuture);
             }
-            m_asyncAddFuture = null;
         }
 
         /**
@@ -2551,11 +2543,6 @@ public class Buffer implements KNIMEStreamConstants {
 
                     if (list != null) {
                         for (BlobSupportDataRow rowInList : list) {
-                            /** Writer thread has been cancelled during clear(). */
-                            if (cancelFuture) {
-                                return null;
-                            }
-
                             m_outputWriter.writeRow(rowInList);
                         }
                     }
@@ -2565,6 +2552,11 @@ public class Buffer implements KNIMEStreamConstants {
                     CACHE.clearForGarbageCollection(Buffer.this);
 
                 } catch (Throwable t) {
+                    if (Thread.currentThread().isInterrupted()) {
+                        /** Exception has been thrown due to the Buffer having been cleared. */
+                        return null;
+                    }
+
                     throwable = t;
                     StringBuilder error = new StringBuilder();
                     error.append("Asynchronous writing of table to file encountered error:");
