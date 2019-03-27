@@ -1740,6 +1740,9 @@ public class Buffer implements KNIMEStreamConstants {
     /** Clears the temp file. Any subsequent iteration will fail! */
     synchronized void clear() {
         m_lifecycle.onClear();
+    }
+
+    void performClear() {
         BufferTracker.getInstance().bufferCleared(this);
         m_listWhileAddRow = null;
         CACHE.invalidate(this);
@@ -2307,6 +2310,8 @@ public class Buffer implements KNIMEStreamConstants {
                 MemoryAlertSystem.getInstance().removeListener(m_memoryAlertListener);
                 m_memoryAlertListener = null;
             }
+
+            performClear();
         }
 
         /** {@inheritDoc} */
@@ -2427,6 +2432,7 @@ public class Buffer implements KNIMEStreamConstants {
         /** {@inheritDoc} */
         @Override
         public void onClear() {
+            performClear();
         }
 
         /** {@inheritDoc} */
@@ -2482,6 +2488,14 @@ public class Buffer implements KNIMEStreamConstants {
             if (m_asyncAddFuture != null && !m_asyncAddFuture.isDone()) {
                 /** We should cancel the asynchronous writer thread. */
                 m_asyncAddFuture.cancel(true);
+                /** Only after the writer thread has terminated gracefully should we clear the buffer. */
+                ASYNC_EXECUTORS.submit(new CallableWithContext<Void>() {
+                    @Override
+                    public Void callWithContext() throws Exception {
+                        performClear();
+                        return null;
+                    }
+                });
             }
         }
 
@@ -2492,30 +2506,23 @@ public class Buffer implements KNIMEStreamConstants {
 
             /** We have to wait for the asynchronous writer thread. */
             if (m_asyncAddFuture != null && !m_asyncAddFuture.isDone()) {
-                waitForFuture(m_asyncAddFuture);
-            }
-        }
-
-        /**
-         * Wait for an asynchronous write task to terminate.
-         */
-        void waitForFuture(final Future<?> future) {
-            try {
-                future.get();
-            } catch (InterruptedException e) {
-                throw new RuntimeException("Interrupted while waiting for asynchronous disk write thread.", e);
-            } catch (ExecutionException e) {
-                StringBuilder error = new StringBuilder();
-                Throwable t = e.getCause();
-                if (t.getMessage() != null) {
-                    error.append(t.getMessage());
-                } else {
-                    error.append("Writing table to file threw exception \"");
-                    error.append(t.getClass().getSimpleName()).append("\"");
+                try {
+                    m_asyncAddFuture.get();
+                } catch (InterruptedException e) {
+                    throw new RuntimeException("Interrupted while waiting for asynchronous disk write thread.", e);
+                } catch (ExecutionException e) {
+                    StringBuilder error = new StringBuilder();
+                    Throwable t = e.getCause();
+                    if (t.getMessage() != null) {
+                        error.append(t.getMessage());
+                    } else {
+                        error.append("Writing table to file threw exception \"");
+                        error.append(t.getClass().getSimpleName()).append("\"");
+                    }
+                    throw new RuntimeException(error.toString(), t);
+                } catch (CancellationException e) {
+                    throw new RuntimeException("Asynchronous disk write thread was unexpectedly cancelled.", e);
                 }
-                throw new RuntimeException(error.toString(), t);
-            } catch (CancellationException e) {
-                throw new RuntimeException("Asynchronous disk write thread was unexpectedly cancelled.", e);
             }
         }
 
@@ -2543,6 +2550,11 @@ public class Buffer implements KNIMEStreamConstants {
 
                     if (list != null) {
                         for (BlobSupportDataRow rowInList : list) {
+                            if (Thread.currentThread().isInterrupted()) {
+                                /** Thread has been interrupted due to Buffer having been cleared. */
+                                return null;
+                            }
+
                             m_outputWriter.writeRow(rowInList);
                         }
                     }
@@ -2552,11 +2564,6 @@ public class Buffer implements KNIMEStreamConstants {
                     CACHE.clearForGarbageCollection(Buffer.this);
 
                 } catch (Throwable t) {
-                    if (Thread.currentThread().isInterrupted()) {
-                        /** Exception has been thrown due to the Buffer having been cleared. */
-                        return null;
-                    }
-
                     throwable = t;
                     StringBuilder error = new StringBuilder();
                     error.append("Asynchronous writing of table to file encountered error:");
