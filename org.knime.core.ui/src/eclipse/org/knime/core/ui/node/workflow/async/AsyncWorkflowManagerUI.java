@@ -52,8 +52,11 @@ import org.knime.core.node.NodeFactory;
 import org.knime.core.node.workflow.ConnectionID;
 import org.knime.core.node.workflow.NodeID;
 import org.knime.core.node.workflow.NodeUIInformation;
+import org.knime.core.node.workflow.WorkflowAnnotation;
 import org.knime.core.node.workflow.WorkflowAnnotationID;
 import org.knime.core.node.workflow.WorkflowCopyContent;
+import org.knime.core.node.workflow.action.CollapseIntoMetaNodeResult;
+import org.knime.core.node.workflow.action.MetaNodeToSubNodeResult;
 import org.knime.core.ui.node.workflow.ConnectionContainerUI;
 import org.knime.core.ui.node.workflow.WorkflowCopyUI;
 import org.knime.core.ui.node.workflow.WorkflowCopyWithOffsetUI;
@@ -186,6 +189,59 @@ public interface AsyncWorkflowManagerUI extends WorkflowManagerUI, AsyncNodeCont
      */
     CompletableFuture<WorkflowCopyContent> pasteAsync(WorkflowCopyWithOffsetUI workflowCopy);
 
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    default String canCollapseNodesIntoMetaNode(final NodeID[] orgIDs) {
+        throw new UnsupportedOperationException("Please use the async method instead.");
+    }
+
+
+    /**
+     * Async version of {@link #canCollapseNodesIntoMetaNode(NodeID[])}.
+     *
+     * @param orgIDs
+     * @return result as future
+     */
+    CompletableFuture<String> canCollapseNodesIntoMetaNodeAsync(final NodeID[] orgIDs);
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    default CollapseIntoMetaNodeResult collapseIntoMetaNode(final NodeID[] orgIDs, final WorkflowAnnotation[] orgAnnos,
+        final String name) {
+        throw new UnsupportedOperationException("Please use the async method instead.");
+    }
+
+    /**
+     * Async version of {@link #collapseIntoMetaNode(NodeID[], WorkflowAnnotation[], String)}.
+     *
+     * @param orgIDs
+     * @param orgAnnos
+     * @param name
+     * @return the result as future
+     */
+    CompletableFuture<CollapseIntoMetaNodeResult> collapseIntoMetaNodeAsync(NodeID[] orgIDs,
+        WorkflowAnnotation[] orgAnnos, String name);
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    default MetaNodeToSubNodeResult convertMetaNodeToSubNode(final NodeID wfmID) {
+        throw new UnsupportedOperationException("Please use the async method instead.");
+    }
+
+    /**
+     * Async version of {@link #convertMetaNodeToSubNode(NodeID)}.
+     *
+     * @param wfmID
+     * @return the result as future
+     *
+     */
+    CompletableFuture<MetaNodeToSubNodeResult> convertMetaNodeToSubNodeAsync(final NodeID wfmID);
 
     /**
      * {@inheritDoc}

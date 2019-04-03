@@ -76,6 +76,8 @@ import org.knime.core.node.workflow.WorkflowCopyContent;
 import org.knime.core.node.workflow.WorkflowListener;
 import org.knime.core.node.workflow.WorkflowManager;
 import org.knime.core.node.workflow.WorkflowPersistor;
+import org.knime.core.node.workflow.action.CollapseIntoMetaNodeResult;
+import org.knime.core.node.workflow.action.MetaNodeToSubNodeResult;
 import org.knime.core.ui.node.workflow.ConnectionContainerUI;
 import org.knime.core.ui.node.workflow.NodeContainerUI;
 import org.knime.core.ui.node.workflow.WorkflowContextUI;
@@ -246,6 +248,22 @@ public final class WorkflowManagerWrapper extends NodeContainerWrapper<WorkflowM
     @Override
     public void executePredecessorsAndWait(final NodeID id) throws InterruptedException {
         unwrap().executePredecessorsAndWait(id);
+    }
+
+    @Override
+    public String canCollapseNodesIntoMetaNode(final NodeID[] orgIDs) {
+        return unwrap().canCollapseNodesIntoMetaNode(orgIDs);
+    }
+
+    @Override
+    public CollapseIntoMetaNodeResult collapseIntoMetaNode(final NodeID[] orgIDs, final WorkflowAnnotation[] orgAnnos,
+        final String name) {
+        return unwrap().collapseIntoMetaNode(orgIDs, orgAnnos, name);
+    }
+
+    @Override
+    public MetaNodeToSubNodeResult convertMetaNodeToSubNode(final NodeID wfmID) {
+        return unwrap().convertMetaNodeToSubNode(wfmID);
     }
 
     @Override

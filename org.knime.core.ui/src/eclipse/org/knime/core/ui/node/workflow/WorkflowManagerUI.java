@@ -80,6 +80,8 @@ import org.knime.core.node.workflow.WorkflowCopyContent;
 import org.knime.core.node.workflow.WorkflowListener;
 import org.knime.core.node.workflow.WorkflowLoadHelper;
 import org.knime.core.node.workflow.WorkflowManager;
+import org.knime.core.node.workflow.action.CollapseIntoMetaNodeResult;
+import org.knime.core.node.workflow.action.MetaNodeToSubNodeResult;
 import org.knime.core.ui.UI;
 import org.knime.core.util.Pair;
 
@@ -496,18 +498,40 @@ public interface WorkflowManagerUI extends NodeContainerUI, UI {
 //     * @return null of ok otherwise reason (String) why not
 //     */
 //    String canExpandMetaNode(NodeID wfmID);
-//
-//
-//    /** Check if we can collapse selected set of nodes into a metanode.
-//     * This essentially checks if the nodes can be moved (=deleted from
-//     * the original WFM), if they are executed, or if moving them would
-//     * result in cycles in the original WFM (outgoing connections fed
-//     * back into inports of the new Metanode).
-//     *
-//     * @param orgIDs the ids of the nodes to be moved to the new metanode.
-//     * @return null or reason why this cannot be done as string.
-//     */
-//    String canCollapseNodesIntoMetaNode(NodeID[] orgIDs);
+
+
+    /** Check if we can collapse selected set of nodes into a metanode.
+     * This essentially checks if the nodes can be moved (=deleted from
+     * the original WFM), if they are executed, or if moving them would
+     * result in cycles in the original WFM (outgoing connections fed
+     * back into inports of the new Metanode).
+     *
+     * @param orgIDs the ids of the nodes to be moved to the new metanode.
+     * @return null or reason why this cannot be done as string.
+     */
+    String canCollapseNodesIntoMetaNode(NodeID[] orgIDs);
+
+    /**
+     * Collapse selected set of nodes into a metanode. Make sure connections from and to nodes not contained in this set
+     * are passed through appropriate ports of the new metanode.
+     *
+     * @param orgIDs the ids of the nodes to be moved to the new metanode.
+     * @param orgAnnos the workflow annotations to be moved
+     * @param name of the new metanode
+     * @return newly create metanode
+     * @throws IllegalArgumentException if collapse cannot be done
+     */
+    public CollapseIntoMetaNodeResult collapseIntoMetaNode(final NodeID[] orgIDs, final WorkflowAnnotation[] orgAnnos,
+        final String name);
+
+    /**
+     * Convert the selected metanode into a subnode.
+     *
+     * @param wfmID the id of the metanode to be converted.
+     * @return ID to the created sub node.
+     * @since 2.10
+     */
+    public MetaNodeToSubNodeResult convertMetaNodeToSubNode(final NodeID wfmID);
 
     /**
      * Check if a node can be reset, meaning that it is executed and all of
