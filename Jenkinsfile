@@ -18,6 +18,7 @@ properties([
 	]),
 	pipelineTriggers([upstream('knime-shared/' + env.BRANCH_NAME.replaceAll('/', '%2F'))]),
 	buildDiscarder(logRotator(numToKeepStr: '5')),
+	disableConcurrentBuilds()
 ])
 
 node('maven') {
