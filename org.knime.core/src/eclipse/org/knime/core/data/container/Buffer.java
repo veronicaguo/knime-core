@@ -717,18 +717,7 @@ public class Buffer implements KNIMEStreamConstants {
     synchronized void addRow(final DataRow r, final boolean isCopyOfExisting, final boolean forceCopyOfBlobs) {
         try {
             BlobSupportDataRow row = saveBlobsAndFileStores(r, isCopyOfExisting, forceCopyOfBlobs);
-            if (getAndIncrementSize() == Integer.MAX_VALUE) {
-                /** Since m_list is an ArrayList, it cannot hold more than Integer.MAX_VALUE rows, so we have to flush
-                 * independent of the lifecycle. */
-                flushBuffer();
-            }
-            if (m_listWhileAddRow != null) {
-                m_listWhileAddRow.add(row);
-                m_lifecycle.onAddRowToList(row);
-            } else {
-                flushBuffer();
-                m_outputWriter.writeRow(row);
-            }
+            addBlobSupportDataRow(row);
         } catch (Exception e) {
             if (!(e instanceof IOException)) {
                 LOGGER.coding("Writing cells to temporary buffer must not throw " + e.getClass().getSimpleName(), e);
@@ -747,7 +736,22 @@ public class Buffer implements KNIMEStreamConstants {
             builder.append(message);
             throw new RuntimeException(builder.toString(), e);
         }
-    } // addRow(DataRow)
+    }
+
+    synchronized void addBlobSupportDataRow(final BlobSupportDataRow row) throws IOException {
+        if (getAndIncrementSize() == Integer.MAX_VALUE) {
+            /** Since m_list is an ArrayList, it cannot hold more than Integer.MAX_VALUE rows, so we have to flush
+             * independent of the lifecycle. */
+            flushBuffer();
+        }
+        if (m_listWhileAddRow != null) {
+            m_listWhileAddRow.add(row);
+            m_lifecycle.onAddRowToList(row);
+        } else {
+            flushBuffer();
+            m_outputWriter.writeRow(row);
+        }
+    }
 
     /**
      * @throws IOException
@@ -765,7 +769,7 @@ public class Buffer implements KNIMEStreamConstants {
         m_outputWriter.setFileStoreHandler((IWriteFileStoreHandler)m_fileStoreHandler);
     }
 
-    private BlobSupportDataRow saveBlobsAndFileStores(final DataRow row, final boolean isCopyOfExisting,
+    synchronized BlobSupportDataRow saveBlobsAndFileStores(final DataRow row, final boolean isCopyOfExisting,
         final boolean forceCopyOfBlobs) throws IOException {
 
         final int cellCount = row.getNumCells();
@@ -789,6 +793,7 @@ public class Buffer implements KNIMEStreamConstants {
 
             DataCell processedCell = handleIncomingBlob(cell, col, cellCount, isCopyOfExisting, forceCopyOfBlobs,
                 isWrapperCell, isCollectionCell);
+            // TODO: Ask Bernd why this requires us to flush the buffer ... is this just to ensure the table is stored to disc?
             if (mustBeFlushedPriorSave(processedCell, isWrapperCell, isCollectionCell)) {
                 if (!isFlushedToDisk()) {
                     LOGGER.debug("Forcing buffer to disc as it contains file store cells that need special handling");

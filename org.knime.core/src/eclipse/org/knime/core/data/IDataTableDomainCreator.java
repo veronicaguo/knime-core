@@ -62,7 +62,7 @@ public interface IDataTableDomainCreator {
      *
      * @param row a data row
      */
-    void updateDomain(DataRow row);
+    void updateDomain(final DataRow row);
 
     /**
      * Set the maximum number of possible values in the domain of a nominal value columns.
@@ -77,5 +77,13 @@ public interface IDataTableDomainCreator {
      * @return an updated table spec
      */
     DataTableSpec createSpec();
+
+    DataCell[] getMin();
+
+    DataCell[] getMax();
+
+    Iterable<DataCell>[] getPossibleVals();
+
+    void merge(final IDataTableDomainCreator dtdc);
 
 }

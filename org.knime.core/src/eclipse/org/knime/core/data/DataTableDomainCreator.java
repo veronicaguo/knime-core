@@ -79,7 +79,11 @@ public class DataTableDomainCreator implements IDataTableDomainCreator {
 
     private final DataCell[] m_mins;
 
+    private final boolean[] m_minsMissing;
+
     private final DataCell[] m_maxs;
+
+    private final boolean[] m_maxsMissing;
 
     private final Set<DataCell>[] m_possVals;
 
@@ -100,7 +104,9 @@ public class DataTableDomainCreator implements IDataTableDomainCreator {
         final DomainCreatorColumnSelection domainMinMaxColumnSelection) {
         m_inputSpec = inputSpec;
         m_mins = new DataCell[inputSpec.getNumColumns()];
+        m_minsMissing = new boolean[inputSpec.getNumColumns()];
         m_maxs = new DataCell[inputSpec.getNumColumns()];
+        m_maxsMissing = new boolean[inputSpec.getNumColumns()];
         m_possVals = new LinkedHashSet[inputSpec.getNumColumns()];
         m_comparators = new DataValueComparator[inputSpec.getNumColumns()];
         m_domainValuesColumnSelection = domainValuesColumnSelection;
@@ -115,9 +121,9 @@ public class DataTableDomainCreator implements IDataTableDomainCreator {
                 if (!m_domainValuesColumnSelection.dropDomain(colSpec) && (values != null)) {
                     m_possVals[i] = new LinkedHashSet<>(values);
                 } else {
-                	// since we're doing a lot of checks for whether a DataCell is contained in the set of possible
-                	// values, we should reduce the amount of expected hash collisions by creating a sufficiently
-                	// large hash set with a low load factor.
+                    // since we're doing a lot of checks for whether a DataCell is contained in the set of possible
+                    // values, we should reduce the amount of expected hash collisions by creating a sufficiently
+                    // large hash set with a low load factor.
                     m_possVals[i] = new LinkedHashSet<>(2 * m_maxPossibleValues, 1 / 3f);
                 }
             }
@@ -130,6 +136,7 @@ public class DataTableDomainCreator implements IDataTableDomainCreator {
                     m_mins[i] = colSpec.getDomain().getLowerBound();
                     if (m_mins[i] == null) { // input spec may not have bounds, but we are asked to compute them
                         m_mins[i] = DataType.getMissingCell();
+                        m_minsMissing[i] = true;
                     }
                     m_maxs[i] = colSpec.getDomain().getUpperBound();
                     if (m_maxs[i] == null) { // input spec may not have bounds, but we are asked to compute them
@@ -137,6 +144,12 @@ public class DataTableDomainCreator implements IDataTableDomainCreator {
                     }
                 }
                 m_comparators[i] = colSpec.getType().getComparator();
+            }
+            if (m_mins[i] != null) {
+                m_minsMissing[i] = m_mins[i].isMissing();
+            }
+            if (m_maxs[i] != null) {
+                m_maxsMissing[i] = m_maxs[i].isMissing();
             }
             i++;
         }
@@ -192,8 +205,14 @@ public class DataTableDomainCreator implements IDataTableDomainCreator {
      */
     private void updateMinMax(final int col, final DataCell cell, final DataCell[] mins, final DataCell[] maxs,
         final DataValueComparator[] comparators) {
-        if (mins[col] == null || cell.isMissing()) {
+        final boolean isMissing = cell.isMissing();
+        if (mins[col] == null || isMissing) {
             return;
+        }
+        if (!isMissing && m_possVals[col] != null) {
+            if (m_possVals[col].add(cell) && (m_possVals[col].size() > m_maxPossibleValues)) {
+                m_possVals[col] = null;
+            }
         }
 
         final DataCell unwrapped = (cell instanceof BlobWrapperDataCell) ? ((BlobWrapperDataCell)cell).getCell() : cell;
@@ -203,11 +222,13 @@ public class DataTableDomainCreator implements IDataTableDomainCreator {
         }
 
         Comparator<DataCell> comparator = comparators[col];
-        if (mins[col].isMissing() || (comparator.compare(unwrapped, mins[col]) < 0)) {
+        if (m_minsMissing[col] || (comparator.compare(unwrapped, mins[col]) < 0)) {
             mins[col] = unwrapped;
+            m_minsMissing[col] = false;
         }
         if (maxs[col].isMissing() || (comparator.compare(unwrapped, maxs[col]) > 0)) {
             maxs[col] = unwrapped;
+            m_maxsMissing[col] = false;
         }
     }
 
@@ -264,11 +285,6 @@ public class DataTableDomainCreator implements IDataTableDomainCreator {
 
         int i = 0;
         for (DataCell c : row) {
-            if (!c.isMissing() && m_possVals[i] != null) {
-                if (m_possVals[i].add(c) && (m_possVals[i].size() > m_maxPossibleValues)) {
-                    m_possVals[i] = null;
-                }
-            }
             updateMinMax(i, c, m_mins, m_maxs, m_comparators);
             i++;
         }
@@ -345,4 +361,70 @@ public class DataTableDomainCreator implements IDataTableDomainCreator {
         throws CanceledExecutionException {
         updateDomain(table, exec, table.size());
     }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public DataCell[] getMin() {
+        return m_mins;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public DataCell[] getMax() {
+        return m_maxs;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public Iterable<DataCell>[] getPossibleVals() {
+        return m_possVals;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void merge(final IDataTableDomainCreator dtdc) {
+        final DataCell[] dtdcMin = dtdc.getMin();
+        final DataCell[] dtdcMax = dtdc.getMax();
+        final Iterable<DataCell>[] dtdcPossVals = dtdc.getPossibleVals();
+        for (int i = 0; i < m_possVals.length; i++) {
+            if (dtdcPossVals[i] != null) {
+                for (final DataCell c : dtdcPossVals[i]) {
+                    if (m_possVals[i] != null) {
+                        if (m_possVals[i].add(c) && (m_possVals[i].size() > m_maxPossibleValues)) {
+                            m_possVals[i] = null;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            } else {
+                m_possVals[i] = null;
+            }
+            final Comparator<DataCell> comparator = m_comparators[i];
+            final DataCell otherMin = dtdcMin[i];
+            if (otherMin != null && !otherMin.isMissing()) {
+
+                if (m_minsMissing[i] || (comparator.compare(otherMin, m_mins[i]) < 0)) {
+                    m_mins[i] = otherMin;
+                    m_minsMissing[i] = false;
+                }
+            }
+            final DataCell otherMax = dtdcMax[i];
+            if (otherMax != null && !otherMax.isMissing()) {
+                if (m_maxs[i].isMissing() || comparator.compare(otherMax, m_maxs[i]) > 0) {
+                    m_maxs[i] = otherMax;
+                    m_maxsMissing[i] = false;
+                }
+            }
+        }
+    }
+
 }

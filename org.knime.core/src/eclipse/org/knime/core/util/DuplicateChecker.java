@@ -233,7 +233,7 @@ public class DuplicateChecker implements IDuplicateChecker {
         if (maxStreams < 2) {
             throw new IllegalArgumentException("The number of streams must be at least 2");
         }
-        m_maxChunkSize = maxChunkSize;
+        m_maxChunkSize = Integer.MAX_VALUE;
         m_maxStreams = maxStreams;
     }
 
