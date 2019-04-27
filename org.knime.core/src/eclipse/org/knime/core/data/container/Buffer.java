@@ -738,7 +738,7 @@ public class Buffer implements KNIMEStreamConstants {
         }
     }
 
-    synchronized void addBlobSupportDataRow(final BlobSupportDataRow row) throws IOException {
+    void addBlobSupportDataRow(final BlobSupportDataRow row) throws IOException {
         if (getAndIncrementSize() == Integer.MAX_VALUE) {
             /** Since m_list is an ArrayList, it cannot hold more than Integer.MAX_VALUE rows, so we have to flush
              * independent of the lifecycle. */
@@ -769,7 +769,7 @@ public class Buffer implements KNIMEStreamConstants {
         m_outputWriter.setFileStoreHandler((IWriteFileStoreHandler)m_fileStoreHandler);
     }
 
-    synchronized BlobSupportDataRow saveBlobsAndFileStores(final DataRow row, final boolean isCopyOfExisting,
+    BlobSupportDataRow saveBlobsAndFileStores(final DataRow row, final boolean isCopyOfExisting,
         final boolean forceCopyOfBlobs) throws IOException {
 
         final int cellCount = row.getNumCells();

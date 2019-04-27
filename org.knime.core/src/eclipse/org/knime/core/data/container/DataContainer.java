@@ -57,6 +57,8 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
@@ -71,6 +73,7 @@ import java.util.zip.ZipOutputStream;
 import org.knime.core.data.DataCell;
 import org.knime.core.data.DataRow;
 import org.knime.core.data.DataTable;
+import org.knime.core.data.DataTableDomainCreator;
 import org.knime.core.data.DataTableSpec;
 import org.knime.core.data.DataType;
 import org.knime.core.data.IDataRepository;
@@ -225,6 +228,8 @@ public class DataContainer implements RowAppender {
 
     private final AtomicLong m_pendingBatch;
 
+    private final BlockingQueue<IDataTableDomainCreator> m_queue;
+
     private long m_curBatch;
 
     private final Map<Long, List<BlobSupportDataRow>> m_blobRowMap;
@@ -346,14 +351,15 @@ public class DataContainer implements RowAppender {
             m_blobRowMap = null;
             m_writeThrowable = null;
             m_nThreads = 0;
+            m_queue = null;
         } else {
             // TODO: This should not be the async cache size
 //            m_nThreads = ASYNC_EXECUTORS.getMaximumPoolSize();
             m_nThreads = settings.getMaxContainerThreads();
             m_blobRowMap = new ConcurrentHashMap<>();
             m_semaphore = new Semaphore(m_nThreads);
+            m_queue = new ArrayBlockingQueue<>(m_nThreads);
             m_batch = new ArrayList<>(m_batchSize);
-            System.out.println("the number of threads is:\t" + m_nThreads);
             m_pendingBatch = new AtomicLong();
             m_writeThrowable = new AtomicReference<Throwable>();
             m_curBatch = 0;
@@ -543,6 +549,9 @@ public class DataContainer implements RowAppender {
             } catch (final InterruptedException ie) {
                 m_writeThrowable.compareAndSet(null, ie);
             }
+            for(final IDataTableDomainCreator domainCreator : m_queue) {
+                m_domainCreator.merge(domainCreator);
+            }
             checkAsyncWriteThrowable();
         }
         // create table spec _after_ all_ rows have been added (i.e. wait for
@@ -690,7 +699,12 @@ public class DataContainer implements RowAppender {
      */
     private void submit() throws InterruptedException {
         m_semaphore.acquire();
-        ASYNC_EXECUTORS.execute(new ContainerRunnable(m_batch, m_curBatch++));
+        IDataTableDomainCreator domainCreator = m_queue.poll();
+        if(domainCreator == null) {
+            domainCreator = new DataTableDomainCreator(m_spec, false);
+        }
+        ASYNC_EXECUTORS.execute(new ContainerDomainRunnable(domainCreator, m_batch, m_curBatch++));
+//        ASYNC_EXECUTORS.execute(new ContainerRunnable(m_batch, m_curBatch++));
         m_batch = new ArrayList<>(m_batchSize);
     }
 
@@ -744,7 +758,7 @@ public class DataContainer implements RowAppender {
      * @throws DuplicateKeyException If a duplicate is encountered. TODO: remove synchronized
      */
     protected void addRowKeyForDuplicateCheck(final RowKey key) {
-        synchronized (m_duplicateChecker) {
+//        synchronized (m_duplicateChecker) {
             try {
                 m_duplicateChecker.addKey(key.toString());
             } catch (IOException ioe) {
@@ -755,7 +769,7 @@ public class DataContainer implements RowAppender {
                     "Encountered duplicate row ID  \"" + dke.getKey() + "\" at row number " + (m_buffer.size() + 1),
                     dke.getKey());
             }
-        }
+//        }
     }
 
     private void updateDomain(final DataRow row) {
@@ -1100,6 +1114,76 @@ public class DataContainer implements RowAppender {
      */
     public static final boolean isContainerTable(final DataTable table) {
         return table instanceof ContainerTable;
+    }
+
+    private final class ContainerDomainRunnable implements Runnable {
+
+        private final IDataTableDomainCreator m_dtdc;
+
+        private final List<DataRow> m_rows;
+
+        private final long m_batchIdx;
+
+        ContainerDomainRunnable(final IDataTableDomainCreator domainCreator,final List<DataRow> rows, final long batchIdx) {
+            m_dtdc = domainCreator;
+            m_rows = rows;
+            m_batchIdx = batchIdx;
+        }
+
+        private boolean hasEntry() {
+            synchronized (m_pendingBatch) {
+                return m_blobRowMap.containsKey(m_pendingBatch.incrementAndGet());
+            }
+        }
+
+        /**
+         * @param blobRows
+         * @throws IOException
+         */
+        private void addRows(final List<BlobSupportDataRow> blobRows) throws IOException {
+            for (final BlobSupportDataRow row : blobRows) {
+                m_buffer.addBlobSupportDataRow(row);
+            }
+        }
+
+        /**
+         * {@inheritDoc}
+         */
+        @Override
+        public void run() {
+            if (m_writeThrowable.get() == null) {
+                try {
+                    final List<BlobSupportDataRow> blobRows = new ArrayList<>(m_rows.size());
+                    for (final DataRow row : m_rows) {
+                        validateSpecCompatiblity(row);
+                        m_dtdc.updateDomain(row);
+                        addRowKeyForDuplicateCheck(row.getKey());
+                        blobRows.add(m_buffer.saveBlobsAndFileStores(row, false, m_forceCopyOfBlobs));
+                    }
+                    boolean addRows;
+                    synchronized (m_pendingBatch) {
+                        addRows = m_batchIdx == m_pendingBatch.get();
+                        if (!addRows) {
+                            m_blobRowMap.put(m_batchIdx, blobRows);
+                        }
+                    }
+                    if (addRows) {
+                        addRows(blobRows);
+                        while (hasEntry()) {
+                            addRows(m_blobRowMap.remove(m_pendingBatch.get()));
+                        }
+                    }
+                } catch (final IOException ioe) {
+                    m_writeThrowable.compareAndSet(null, ioe);
+                } finally {
+                    m_queue.add(m_dtdc);
+                    m_semaphore.release();
+                }
+            } else {
+                m_queue.add(m_dtdc);
+                m_semaphore.release();
+            }
+        }
     }
 
     private final class ContainerRunnable implements Runnable {

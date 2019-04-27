@@ -56,12 +56,12 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.knime.core.node.KNIMEConstants;
 
@@ -187,7 +187,7 @@ public class DuplicateChecker implements IDuplicateChecker {
 
     private final int m_maxStreams;
 
-    private Set<String> m_currentChunk = new HashSet<String>();
+    private Set<String> m_currentChunk = ConcurrentHashMap.newKeySet();
 
     private List<Chunk> m_storedChunks = new ArrayList<Chunk>();
 
