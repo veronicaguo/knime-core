@@ -390,9 +390,9 @@ public class DataTableDomainCreator implements IDataTableDomainCreator {
 
     @Override
     public void merge(final IDataTableDomainCreator dataTableDomainCreator) {
-        CheckUtils.checkArgument(!getInputSpec().equals(dataTableDomainCreator.getInputSpec()),
+        CheckUtils.checkArgument(getInputSpec().equals(dataTableDomainCreator.getInputSpec()),
             "Cannot merge data table domain creators based on different table specs");
-        CheckUtils.checkArgument(getMaxPossibleVals() != dataTableDomainCreator.getMaxPossibleVals(),
+        CheckUtils.checkArgument(getMaxPossibleVals() == dataTableDomainCreator.getMaxPossibleVals(),
             "Cannot merge data table domain creators using a different number of unique values");
         final DataCell[] dtdcMin = dataTableDomainCreator.getMin();
         final DataCell[] dtdcMax = dataTableDomainCreator.getMax();
