@@ -62,6 +62,8 @@ import java.util.NoSuchElementException;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.knime.core.node.KNIMEConstants;
 
@@ -191,6 +193,8 @@ public class DuplicateChecker implements IDuplicateChecker {
 
     private List<Chunk> m_storedChunks = new ArrayList<Chunk>();
 
+    private final ReadWriteLock m_readWriteLock = new ReentrantReadWriteLock();
+
     private static final boolean DISABLE_DUPLICATE_CHECK =
         Boolean.getBoolean(
                 KNIMEConstants.PROPERTY_DISABLE_ROWID_DUPLICATE_CHECK);
@@ -244,6 +248,7 @@ public class DuplicateChecker implements IDuplicateChecker {
         if (DISABLE_DUPLICATE_CHECK) {
             return;
         }
+        m_readWriteLock.readLock().lock();
         // bug fix #1737: keys may be just wrappers of very large strings ...
         // we make a copy, which consist of the important characters only
         if (!m_currentChunk.add(new String(s))) {
@@ -252,6 +257,7 @@ public class DuplicateChecker implements IDuplicateChecker {
         if (m_currentChunk.size() >= m_maxChunkSize) {
             writeChunk();
         }
+        m_readWriteLock.readLock().unlock();
     }
 
     /** {@inheritDoc} */
@@ -360,6 +366,7 @@ public class DuplicateChecker implements IDuplicateChecker {
      * @throws IOException if an I/O error occurs
      */
     private void writeChunk() throws IOException {
+        m_readWriteLock.writeLock().lock();
         if (m_currentChunk.isEmpty()) {
             return;
         }
@@ -368,6 +375,7 @@ public class DuplicateChecker implements IDuplicateChecker {
         c.close();
         m_storedChunks.add(c);
         m_currentChunk.clear();
+        m_readWriteLock.writeLock().unlock();
     }
 
     /**

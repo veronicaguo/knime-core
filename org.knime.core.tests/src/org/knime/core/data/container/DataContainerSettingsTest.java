@@ -59,6 +59,7 @@ import static org.knime.core.data.container.DataContainer.SYNCHRONOUS_IO;
 import java.io.IOException;
 
 import org.junit.Test;
+import org.knime.core.data.DataCell;
 import org.knime.core.data.DataRow;
 import org.knime.core.data.DataTableDomainCreator;
 import org.knime.core.data.DataTableSpec;
@@ -179,6 +180,42 @@ public final class DataContainerSettingsTest extends TestCase {
             @Override
             public DataTableSpec createSpec() {
                 return null;
+            }
+
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public DataCell[] getMin() {
+                // TODO Auto-generated method stub
+                return null;
+            }
+
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public DataCell[] getMax() {
+                // TODO Auto-generated method stub
+                return null;
+            }
+
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public Iterable<DataCell>[] getPossibleVals() {
+                // TODO Auto-generated method stub
+                return null;
+            }
+
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public void merge(final IDataTableDomainCreator dtdc) {
+                // TODO Auto-generated method stub
+
             }
 
         }

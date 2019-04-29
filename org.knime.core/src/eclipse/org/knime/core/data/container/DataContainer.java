@@ -51,6 +51,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.ref.WeakReference;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -703,7 +704,7 @@ public class DataContainer implements RowAppender {
         if(domainCreator == null) {
             domainCreator = new DataTableDomainCreator(m_spec, false);
         }
-        ASYNC_EXECUTORS.execute(new ContainerDomainRunnable(domainCreator, m_batch, m_curBatch++));
+        ASYNC_EXECUTORS.execute(new ContainerDomainRunnable(m_buffer, domainCreator, m_batch, m_curBatch++));
 //        ASYNC_EXECUTORS.execute(new ContainerRunnable(m_batch, m_curBatch++));
         m_batch = new ArrayList<>(m_batchSize);
     }
@@ -1118,32 +1119,20 @@ public class DataContainer implements RowAppender {
 
     private final class ContainerDomainRunnable implements Runnable {
 
+        private final WeakReference<Buffer> m_bufferRef;
+
         private final IDataTableDomainCreator m_dtdc;
 
         private final List<DataRow> m_rows;
 
         private final long m_batchIdx;
 
-        ContainerDomainRunnable(final IDataTableDomainCreator domainCreator,final List<DataRow> rows, final long batchIdx) {
+        ContainerDomainRunnable(final Buffer buffer, final IDataTableDomainCreator domainCreator,
+            final List<DataRow> rows, final long batchIdx) {
+            m_bufferRef = new WeakReference<Buffer>(buffer);
             m_dtdc = domainCreator;
             m_rows = rows;
             m_batchIdx = batchIdx;
-        }
-
-        private boolean hasEntry() {
-            synchronized (m_pendingBatch) {
-                return m_blobRowMap.containsKey(m_pendingBatch.incrementAndGet());
-            }
-        }
-
-        /**
-         * @param blobRows
-         * @throws IOException
-         */
-        private void addRows(final List<BlobSupportDataRow> blobRows) throws IOException {
-            for (final BlobSupportDataRow row : blobRows) {
-                m_buffer.addBlobSupportDataRow(row);
-            }
         }
 
         /**
@@ -1151,14 +1140,15 @@ public class DataContainer implements RowAppender {
          */
         @Override
         public void run() {
-            if (m_writeThrowable.get() == null) {
+            final Buffer buffer;
+            if (m_writeThrowable.get() == null && (buffer = m_bufferRef.get()) != null) {
                 try {
                     final List<BlobSupportDataRow> blobRows = new ArrayList<>(m_rows.size());
                     for (final DataRow row : m_rows) {
                         validateSpecCompatiblity(row);
                         m_dtdc.updateDomain(row);
                         addRowKeyForDuplicateCheck(row.getKey());
-                        blobRows.add(m_buffer.saveBlobsAndFileStores(row, false, m_forceCopyOfBlobs));
+                        blobRows.add(m_buffer.saveBlobsAndFileStores(row, m_forceCopyOfBlobs));
                     }
                     boolean addRows;
                     synchronized (m_pendingBatch) {
@@ -1168,9 +1158,9 @@ public class DataContainer implements RowAppender {
                         }
                     }
                     if (addRows) {
-                        addRows(blobRows);
+                        addRows(buffer, blobRows);
                         while (hasEntry()) {
-                            addRows(m_blobRowMap.remove(m_pendingBatch.get()));
+                            addRows(buffer, m_blobRowMap.remove(m_pendingBatch.get()));
                         }
                     }
                 } catch (final IOException ioe) {
@@ -1184,18 +1174,18 @@ public class DataContainer implements RowAppender {
                 m_semaphore.release();
             }
         }
-    }
 
-    private final class ContainerRunnable implements Runnable {
-
-        private final List<DataRow> m_rows;
-
-        private final long m_batchIdx;
-
-        ContainerRunnable(final List<DataRow> rows, final long batchIdx) {
-            m_rows = rows;
-            m_batchIdx = batchIdx;
+        /**
+         * @param buffer
+         * @param blobRows
+         * @throws IOException
+         */
+        private void addRows(final Buffer buffer, final List<BlobSupportDataRow> blobRows) throws IOException {
+            for (final BlobSupportDataRow row : blobRows) {
+                buffer.addBlobSupportDataRow(row);
+            }
         }
+
 
         private boolean hasEntry() {
             synchronized (m_pendingBatch) {
@@ -1203,14 +1193,20 @@ public class DataContainer implements RowAppender {
             }
         }
 
-        /**
-         * @param blobRows
-         * @throws IOException
-         */
-        private void addRows(final List<BlobSupportDataRow> blobRows) throws IOException {
-            for (final BlobSupportDataRow row : blobRows) {
-                m_buffer.addBlobSupportDataRow(row);
-            }
+    }
+
+    private final class ContainerRunnable implements Runnable {
+
+        private final WeakReference<Buffer> m_bufferRef;
+
+        private final List<DataRow> m_rows;
+
+        private final long m_batchIdx;
+
+        ContainerRunnable(final Buffer buffer, final List<DataRow> rows, final long batchIdx) {
+            m_bufferRef = new WeakReference<Buffer>(buffer);
+            m_rows = rows;
+            m_batchIdx = batchIdx;
         }
 
         /**
@@ -1218,14 +1214,15 @@ public class DataContainer implements RowAppender {
          */
         @Override
         public void run() {
-            if (m_writeThrowable.get() == null) {
+            final Buffer buffer;
+            if (m_writeThrowable.get() == null && ((buffer = m_bufferRef.get()) != null)) {
                 try {
                     final List<BlobSupportDataRow> blobRows = new ArrayList<>(m_rows.size());
                     for (final DataRow row : m_rows) {
                         validateSpecCompatiblity(row);
                         updateDomain(row);
                         addRowKeyForDuplicateCheck(row.getKey());
-                        blobRows.add(m_buffer.saveBlobsAndFileStores(row, false, m_forceCopyOfBlobs));
+                        blobRows.add(buffer.saveBlobsAndFileStores(row, m_forceCopyOfBlobs));
                     }
                     boolean addRows;
                     synchronized (m_pendingBatch) {
@@ -1235,9 +1232,9 @@ public class DataContainer implements RowAppender {
                         }
                     }
                     if (addRows) {
-                        addRows(blobRows);
+                        addRows(buffer,blobRows);
                         while (hasEntry()) {
-                            addRows(m_blobRowMap.remove(m_pendingBatch.get()));
+                            addRows(buffer, m_blobRowMap.remove(m_pendingBatch.get()));
                         }
                     }
                 } catch (final IOException ioe) {
@@ -1249,6 +1246,25 @@ public class DataContainer implements RowAppender {
                 m_semaphore.release();
             }
         }
+
+        /**
+         * @param blobRows
+         * @throws IOException
+         */
+        private void addRows(final Buffer buffer, final List<BlobSupportDataRow> blobRows) throws IOException {
+            for (final BlobSupportDataRow row : blobRows) {
+                buffer.addBlobSupportDataRow(row);
+            }
+        }
+
+        private boolean hasEntry() {
+            synchronized (m_pendingBatch) {
+                return m_blobRowMap.containsKey(m_pendingBatch.incrementAndGet());
+            }
+        }
+
+
+
     }
 
     /**

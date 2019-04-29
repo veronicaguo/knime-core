@@ -76,6 +76,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -84,6 +85,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import java.util.zip.Deflater;
 import java.util.zip.GZIPOutputStream;
 import java.util.zip.ZipEntry;
@@ -481,7 +483,26 @@ public class Buffer implements KNIMEStreamConstants {
      */
     private List<BlobSupportDataRow> m_listWhileAddRow;
 
-    private int[] m_indicesOfBlobInColumns;
+    /** Indices used to create {@link BlobAddress}. */
+    private AtomicInteger[] m_indicesOfBlobInColumns;
+
+    /**
+     * Lock ensuring that {@link #m_indicesOfBlobInColumns} don't get initialized several times due to racing condition.
+     */
+    private final Object m_indicesLock;
+
+    /**
+     * Lock ensuring that {@link #ensureWriterIsOpen()} does not initialized everything several times due to racing
+     * condition.
+     */
+    private final Object m_writerLock;
+
+    /**
+     * Lock ensuren that {@link #ensureTempFileExists()} does not create a deadlock, when
+     * {@link #handleIncomingBlob(DataCell, int, int, boolean, boolean, boolean, boolean)} and {@link #flushBuffer()}
+     * are called by different threads at the same time.
+     */
+    private final Object m_tmpFileLock;
 
     /** the spec the rows comply with, no checking is done, however. */
     private DataTableSpec m_spec;
@@ -514,7 +535,7 @@ public class Buffer implements KNIMEStreamConstants {
      * gets copied into this buffer multiple times ... we would copy each time it is added, which is bad. This member is
      * null if this buffer is not in write-mode or it does not need to copy blobs.
      */
-    private HashMap<BlobAddress, BlobAddress> m_copiedBlobsMap;
+    private Map<BlobAddress, BlobAddress> m_copiedBlobsMap;
 
     /** To debug AP-8469 -- leaking Buffer objects when running text processing test workflows. */
     private final String m_fullStackTraceAtConstructionTime = Arrays.stream(Thread.currentThread().getStackTrace())
@@ -581,6 +602,9 @@ public class Buffer implements KNIMEStreamConstants {
         m_dataRepository = dataRepository;
         m_spec = spec;
         m_outputFormat = m_bufferSettings.getOutputFormat(m_spec);
+        m_indicesLock = new Object();
+        m_writerLock = new Object();
+        m_tmpFileLock = new Object();
         BufferTracker.getInstance().bufferCreated(this);
     }
 
@@ -650,6 +674,9 @@ public class Buffer implements KNIMEStreamConstants {
             ioe.initCause(ise);
             throw ioe;
         }
+        m_tmpFileLock= new Object();
+        m_indicesLock = null;
+        m_writerLock = null;
         BufferTracker.getInstance().bufferCreated(this);
     }
 
@@ -769,7 +796,15 @@ public class Buffer implements KNIMEStreamConstants {
         m_outputWriter.setFileStoreHandler((IWriteFileStoreHandler)m_fileStoreHandler);
     }
 
-    BlobSupportDataRow saveBlobsAndFileStores(final DataRow row, final boolean isCopyOfExisting,
+    BlobSupportDataRow saveBlobsAndFileStores(final DataRow row, final boolean forceCopyOfBlobs)
+        throws IOException {
+
+        final BlobSupportDataRow blobRow = saveBlobsAndFileStores(row, false, forceCopyOfBlobs);
+
+        return blobRow;
+    }
+
+    private BlobSupportDataRow saveBlobsAndFileStores(final DataRow row, final boolean isCopyOfExisting,
         final boolean forceCopyOfBlobs) throws IOException {
 
         final int cellCount = row.getNumCells();
@@ -794,6 +829,7 @@ public class Buffer implements KNIMEStreamConstants {
             DataCell processedCell = handleIncomingBlob(cell, col, cellCount, isCopyOfExisting, forceCopyOfBlobs,
                 isWrapperCell, isCollectionCell);
             // TODO: Ask Bernd why this requires us to flush the buffer ... is this just to ensure the table is stored to disc?
+            // Could this be moved to addRow?
             if (mustBeFlushedPriorSave(processedCell, isWrapperCell, isCollectionCell)) {
                 if (!isFlushedToDisk()) {
                     LOGGER.debug("Forcing buffer to disc as it contains file store cells that need special handling");
@@ -858,6 +894,7 @@ public class Buffer implements KNIMEStreamConstants {
         } else {
             return cell; // ordinary cell (e.g. double cell)
         }
+        // at this point cell can only be a WrapperCell or BlobDataCell
         boolean forceCopyOfBlobs = forceCopyOfBlobsArg;
         Buffer ownerBuffer;
         if (ad != null) {
@@ -884,6 +921,7 @@ public class Buffer implements KNIMEStreamConstants {
         } else {
             ownerBuffer = null;
         }
+        // TODO: THIS IS THE MAJOR PROBLEM!
         // if we have to make a clone of the blob cell (true if
         // isCopyOfExisting is true and the blob address corresponds to the next
         // assignable m_indicesOfBlobInColumns[col])
@@ -897,7 +935,7 @@ public class Buffer implements KNIMEStreamConstants {
                 isToCloneForVersionHop = ad.getIndexOfBlobInColumn() == 0;
                 assert isToCloneForVersionHop : "Clone of buffer does not return blobs in order";
             } else if (isToCloneForVersionHop && m_indicesOfBlobInColumns != null) {
-                isToCloneForVersionHop = ad.getIndexOfBlobInColumn() == m_indicesOfBlobInColumns[col];
+                isToCloneForVersionHop = ad.getIndexOfBlobInColumn() == m_indicesOfBlobInColumns[col].get();
             }
         }
 
@@ -907,7 +945,7 @@ public class Buffer implements KNIMEStreamConstants {
         // don't overwrite the deep-clone
         if (forceCopyOfBlobs && !isToCloneForVersionHop) {
             if (m_copiedBlobsMap == null) {
-                m_copiedBlobsMap = new HashMap<BlobAddress, BlobAddress>();
+                m_copiedBlobsMap = new ConcurrentHashMap<BlobAddress, BlobAddress>();
             }
             // if not previously copied into this buffer
             if (ad != null) {
@@ -939,9 +977,7 @@ public class Buffer implements KNIMEStreamConstants {
                 }
                 ad = rewrite;
             }
-            if (m_indicesOfBlobInColumns == null) {
-                m_indicesOfBlobInColumns = new int[totalColCount];
-            }
+            initIndicesOfBlobInColumns(totalColCount);
             Buffer b = null; // to buffer to copy the blob from (if at all)
             if (isToCloneDueToForceCopyOfBlobs) {
                 b = ownerBuffer;
@@ -951,7 +987,7 @@ public class Buffer implements KNIMEStreamConstants {
                 b = tbl == null ? null : tbl.getBuffer();
             }
             if (b != null && !isToCloneForVersionHop) {
-                int indexBlobInCol = m_indicesOfBlobInColumns[col]++;
+                int indexBlobInCol = m_indicesOfBlobInColumns[col].getAndIncrement();
                 rewrite.setIndexOfBlobInColumn(indexBlobInCol);
                 File source = b.getBlobFile(ad.getIndexOfBlobInColumn(), ad.getColumn(), false, ad.isUseCompression());
                 File dest = getBlobFile(indexBlobInCol, col, true, ad.isUseCompression());
@@ -971,9 +1007,11 @@ public class Buffer implements KNIMEStreamConstants {
                 // also cause trouble ("no such file"), which is ok as we need
                 // to take an error along
                 if (bc != null) {
-                    if (m_outputWriter == null) {
-                        ensureTempFileExists();
-                        initOutputWriter(m_binFile);
+                    synchronized (m_writerLock) {
+                        if (m_outputWriter == null) {
+                            ensureTempFileExists();
+                            initOutputWriter(m_binFile);
+                        }
                     }
                     writeBlobDataCell(bc, rewrite);
                     wc = new BlobWrapperDataCell(this, rewrite, cl, bc);
@@ -993,6 +1031,20 @@ public class Buffer implements KNIMEStreamConstants {
         return wc;
     }
 
+    /**
+     * Initialized the {@link #m_indicesOfBlobInColumns} of the given size if required.
+     *
+     * @param totalColCount the size of the array
+     */
+    private void initIndicesOfBlobInColumns(final int totalColCount) {
+        synchronized (m_indicesLock) {
+            if (m_indicesOfBlobInColumns == null) {
+                m_indicesOfBlobInColumns =
+                    Stream.generate(() -> new AtomicInteger()).limit(totalColCount).toArray(AtomicInteger[]::new);
+            }
+        }
+    }
+
     private void writeBlobDataCell(final BlobDataCell cell, final BlobAddress a) throws IOException {
         DataCellSerializer<DataCell> ser = m_outputWriter.getSerializerForDataCell(CellClassInfo.get(cell));
         // addRow will make sure that m_indicesOfBlobInColumns is initialized
@@ -1000,11 +1052,9 @@ public class Buffer implements KNIMEStreamConstants {
         // buffer object, it means that this buffer has been closed!
         // (When can this happen? This buffer resides in memory, a successor
         // node is written to disc; they have different memory policies.)
-        if (m_indicesOfBlobInColumns == null) {
-            m_indicesOfBlobInColumns = new int[m_spec.getNumColumns()];
-        }
+        initIndicesOfBlobInColumns(m_spec.getNumColumns());
         int column = a.getColumn();
-        int indexInColumn = m_indicesOfBlobInColumns[column]++;
+        int indexInColumn = m_indicesOfBlobInColumns[column].getAndIncrement();
         a.setIndexOfBlobInColumn(indexInColumn);
         boolean isToCompress = Buffer.isUseCompressionForBlobs(CellClassInfo.get(cell));
         File outFile = getBlobFile(indexInColumn, column, true, isToCompress);
@@ -1031,6 +1081,7 @@ public class Buffer implements KNIMEStreamConstants {
             }
         }
         OutputStream out = new BufferedOutputStream(new FileOutputStream(outFile));
+        // TODO: Slightly incorret now
         Buffer.onFileCreated(outFile);
         if (isToCompress) {
             out = new GZIPOutputStream(out);
@@ -1078,9 +1129,11 @@ public class Buffer implements KNIMEStreamConstants {
 
     /** Creates temp file (m_binFile) and adds this buffer to shutdown hook. */
     private void ensureTempFileExists() throws IOException {
-        if (m_binFile == null) {
-            m_binFile = DataContainer.createTempFile(m_outputFormat.getFilenameSuffix());
-            OPENBUFFERS.add(new WeakReference<Buffer>(this));
+        synchronized (m_tmpFileLock) {
+            if (m_binFile == null) {
+                m_binFile = DataContainer.createTempFile(m_outputFormat.getFilenameSuffix());
+                OPENBUFFERS.add(new WeakReference<Buffer>(this));
+            }
         }
     }
 
@@ -1120,15 +1173,16 @@ public class Buffer implements KNIMEStreamConstants {
 
     private void ensureWriterIsOpen() throws IOException {
         if (m_hasTempFile) {
-            ensureTempFileExists();
-            if (m_outputWriter == null) {
-                if (!m_binFile.getParentFile().isDirectory()) {
-                    throw new FileNotFoundException(
-                        "Directory " + m_binFile.getParentFile() + " for buffer " + m_bufferID + " does not exist");
+            synchronized (m_writerLock) {
+                ensureTempFileExists();
+                if (m_outputWriter == null) {
+                    if (!m_binFile.getParentFile().isDirectory()) {
+                        throw new FileNotFoundException(
+                            "Directory " + m_binFile.getParentFile() + " for buffer " + m_bufferID + " does not exist");
+                    }
+                    initOutputWriter(m_binFile);
+                    Buffer.onFileCreated(m_binFile);
                 }
-
-                initOutputWriter(m_binFile);
-                Buffer.onFileCreated(m_binFile);
             }
         }
         m_flushedToDisk = true;
