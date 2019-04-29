@@ -58,7 +58,7 @@ import org.hamcrest.CoreMatchers;
 import org.junit.Test;
 import org.knime.core.data.container.DataContainerSettings;
 import org.knime.core.util.DuplicateKeyException;
-import org.knime.core.util.IDuplicateChecker;
+import org.knime.core.util.ThreadSafeDuplicateChecker;
 
 /**
  * Tests checking that the workflow tests make proper use of {@link DataContainerSettings}.
@@ -86,13 +86,13 @@ public class TestWorkflowSettings extends WorkflowTestCase {
 
     /**
      * Ensures that altered {@link DataContainerSettings} are used while executing workflows. This is tested by forcing
-     * the {@link IDuplicateChecker} to throw an exception.
+     * the {@link ThreadSafeDuplicateChecker} to throw an exception.
      *
      * @throws Exception - If something goes wrong while loading or executing the workflow
      */
     @Test
     public void testBrokenWorkflowSettings() throws Exception {
-        test(DataContainerSettings.getDefault().withDuplicateChecker(() -> new IDuplicateChecker() {
+        test(DataContainerSettings.getDefault().withDuplicateChecker(() -> new ThreadSafeDuplicateChecker() {
 
             @Override
             public void clear() {
@@ -107,6 +107,11 @@ public class TestWorkflowSettings extends WorkflowTestCase {
             public void addKey(final String s) throws DuplicateKeyException, IOException {
 
             }
+
+            @Override
+            public void writeToDisk() throws IOException {
+            }
+
         }));
         NodeMessage msgOfNode = findNodeContainer(m_dataGenerator).getNodeMessage();
         // should complain about duplicate key exception

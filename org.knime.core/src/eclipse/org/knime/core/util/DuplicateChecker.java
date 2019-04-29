@@ -56,14 +56,12 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.PriorityQueue;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import org.knime.core.node.KNIMEConstants;
 
@@ -82,7 +80,7 @@ import org.knime.core.node.KNIMEConstants;
  *
  * @author Thorsten Meinl, University of Konstanz
  */
-public class DuplicateChecker implements IDuplicateChecker {
+public class DuplicateChecker implements ThreadSafeDuplicateChecker {
     private static class Chunk {
         private final File m_file;
         private DataOutputStream m_out;
@@ -189,11 +187,9 @@ public class DuplicateChecker implements IDuplicateChecker {
 
     private final int m_maxStreams;
 
-    private Set<String> m_currentChunk = ConcurrentHashMap.newKeySet();
+    private Set<String> m_currentChunk = new HashSet<>();
 
     private List<Chunk> m_storedChunks = new ArrayList<Chunk>();
-
-    private final ReadWriteLock m_readWriteLock = new ReentrantReadWriteLock();
 
     private static final boolean DISABLE_DUPLICATE_CHECK =
         Boolean.getBoolean(
@@ -225,6 +221,17 @@ public class DuplicateChecker implements IDuplicateChecker {
         this(MAX_CHUNK_SIZE, MAX_STREAMS);
     }
 
+
+    /**
+     * Creates a new duplicate checker with the given chunk size.
+     *
+     * @param maxChunkSize the size of each chunk, i.e. the maximum number of elements kept in memory
+     * @since 3.8
+     */
+    public DuplicateChecker(final int maxChunkSize) {
+        this(maxChunkSize, MAX_STREAMS);
+    }
+
     /**
      * Creates a new duplicate checker.
      *
@@ -237,18 +244,16 @@ public class DuplicateChecker implements IDuplicateChecker {
         if (maxStreams < 2) {
             throw new IllegalArgumentException("The number of streams must be at least 2");
         }
-        m_maxChunkSize = Integer.MAX_VALUE;
+        m_maxChunkSize = maxChunkSize;
         m_maxStreams = maxStreams;
     }
 
-    /** {@inheritDoc} */
     @Override
-    public void addKey(final String s) throws DuplicateKeyException,
+    synchronized public void addKey(final String s) throws DuplicateKeyException,
             IOException {
         if (DISABLE_DUPLICATE_CHECK) {
             return;
         }
-        m_readWriteLock.readLock().lock();
         // bug fix #1737: keys may be just wrappers of very large strings ...
         // we make a copy, which consist of the important characters only
         if (!m_currentChunk.add(new String(s))) {
@@ -257,12 +262,10 @@ public class DuplicateChecker implements IDuplicateChecker {
         if (m_currentChunk.size() >= m_maxChunkSize) {
             writeChunk();
         }
-        m_readWriteLock.readLock().unlock();
     }
 
-    /** {@inheritDoc} */
     @Override
-    public void checkForDuplicates() throws DuplicateKeyException, IOException {
+    synchronized public void checkForDuplicates() throws DuplicateKeyException, IOException {
         if (m_storedChunks.size() == 0) {
             // less than MAX_CHUNK_SIZE keys, no need to write
             // a file because the check for duplicates has already
@@ -273,12 +276,14 @@ public class DuplicateChecker implements IDuplicateChecker {
         checkForDuplicates(m_storedChunks);
     }
 
-    /**
-     * Clears the checker, i.e. removes all temporary files and all keys in
-     * memory.
-     */
     @Override
-    public void clear() {
+    synchronized public void writeToDisk() throws IOException {
+        writeChunk();
+    }
+
+
+    @Override
+    synchronized public void clear() {
         for (Chunk c : m_storedChunks) {
             c.dispose();
         }
@@ -286,6 +291,7 @@ public class DuplicateChecker implements IDuplicateChecker {
         m_storedChunks.clear();
         m_currentChunk.clear();
     }
+
 
     /**
      * Checks for duplicates.
@@ -366,7 +372,6 @@ public class DuplicateChecker implements IDuplicateChecker {
      * @throws IOException if an I/O error occurs
      */
     private void writeChunk() throws IOException {
-        m_readWriteLock.writeLock().lock();
         if (m_currentChunk.isEmpty()) {
             return;
         }
@@ -375,7 +380,6 @@ public class DuplicateChecker implements IDuplicateChecker {
         c.close();
         m_storedChunks.add(c);
         m_currentChunk.clear();
-        m_readWriteLock.writeLock().unlock();
     }
 
     /**
@@ -449,4 +453,5 @@ public class DuplicateChecker implements IDuplicateChecker {
         super.finalize();
         clear();
     }
+
 }
