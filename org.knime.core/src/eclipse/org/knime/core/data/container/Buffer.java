@@ -777,7 +777,7 @@ public class Buffer implements KNIMEStreamConstants {
         }
     }
 
-    void addBlobSupportDataRow(final BlobSupportDataRow row) throws IOException {
+    synchronized void addBlobSupportDataRow(final BlobSupportDataRow row) throws IOException {
         if (getAndIncrementSize() == Integer.MAX_VALUE) {
             /** Since m_list is an ArrayList, it cannot hold more than Integer.MAX_VALUE rows, so we have to flush
              * independent of the lifecycle. */
