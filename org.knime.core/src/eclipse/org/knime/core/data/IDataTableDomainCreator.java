@@ -78,12 +78,32 @@ public interface IDataTableDomainCreator {
      */
     DataTableSpec createSpec();
 
+    /**
+     * Returns an array storing the minimum value for each column.
+     *
+     * @return the minima for each individual column
+     */
     DataCell[] getMin();
 
+    /**
+     * Returns an array storing the maximum value for each column.
+     *
+     * @return the maxima for each individual column
+     */
     DataCell[] getMax();
 
+    /**
+     * Returns an array storing the possible values for each column.
+     *
+     * @return an array of the possible values for each individual column
+     */
     Iterable<DataCell>[] getPossibleVals();
 
-    void merge(final IDataTableDomainCreator dtdc);
+    /**
+     * Merges two distinct {@link IDataTableDomainCreator}.
+     *
+     * @param dataTableDomainCreator the {@code IDataTableDomainCreator} to be merged
+     */
+    void merge(final IDataTableDomainCreator dataTableDomainCreator);
 
 }

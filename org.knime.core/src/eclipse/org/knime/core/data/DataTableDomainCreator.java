@@ -187,7 +187,6 @@ public class DataTableDomainCreator implements IDataTableDomainCreator {
         });
     }
 
-    /** {@inheritDoc} */
     @Override
     public void setMaxPossibleValues(final int maxValues) {
         if (maxValues < 0) {
@@ -212,7 +211,7 @@ public class DataTableDomainCreator implements IDataTableDomainCreator {
                 m_possVals[col] = null;
             }
         }
-        
+
         if (mins[col] == null || isMissing) {
             return;
         }
@@ -279,7 +278,6 @@ public class DataTableDomainCreator implements IDataTableDomainCreator {
         return new DataTableSpec(m_inputSpec.getName(), outColSpecs);
     }
 
-    /** {@inheritDoc} */
     @Override
     public void updateDomain(final DataRow row) {
         assert row.getNumCells() == m_inputSpec.getNumColumns() : "Unequal number of columns in spec and row: "
@@ -364,33 +362,21 @@ public class DataTableDomainCreator implements IDataTableDomainCreator {
         updateDomain(table, exec, table.size());
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public DataCell[] getMin() {
         return m_mins;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public DataCell[] getMax() {
         return m_maxs;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public Iterable<DataCell>[] getPossibleVals() {
         return m_possVals;
     }
 
-    /**
-     * {@inheritDoc}
-     */
     @Override
     public void merge(final IDataTableDomainCreator dtdc) {
         final DataCell[] dtdcMin = dtdc.getMin();

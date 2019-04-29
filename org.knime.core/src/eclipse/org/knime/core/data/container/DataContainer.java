@@ -227,22 +227,33 @@ public class DataContainer implements RowAppender {
      */
     private final boolean m_isSynchronousWrite;
 
+    /**
+     * The index of the pending batch, i.e., the index of the next batch that has to be forwarded to the {@link Buffer}.
+     */
     private final AtomicLong m_pendingBatch;
 
+    /** The queue storing the {@link IDataTableDomainCreator} used by the {@link ContainerDomainRunnable}. */
     private final BlockingQueue<IDataTableDomainCreator> m_queue;
 
+    /** The index of the current batch. */
     private long m_curBatch;
 
+    /** Map storing those rows that still need to be forwarded to the {@link Buffer}. */
     private final Map<Long, List<BlobSupportDataRow>> m_blobRowMap;
 
+    /** The batch. */
     private List<DataRow> m_batch;
 
+    /** The size of each batch submitted to the {@link #ASYNC_EXECUTORS} service. */
     private final int m_batchSize;
 
+    /** The maximum number of threads used by this container. */
     final int m_nThreads;
 
+    /** Semaphore used to block the container until all {@link ContainerDomainRunnable} are finished. */
     private final Semaphore m_semaphore;
 
+    /** The maximum number of rows kept in memory. */
     private int m_maxRowsInMemory;
 
     /** Holds the keys of the added rows to check for duplicates. */
@@ -354,9 +365,7 @@ public class DataContainer implements RowAppender {
             m_nThreads = 0;
             m_queue = null;
         } else {
-            // TODO: This should not be the async cache size
-            //            m_nThreads = ASYNC_EXECUTORS.getMaximumPoolSize();
-            m_nThreads = settings.getMaxContainerThreads();
+            m_nThreads = Math.min(settings.getMaxContainerThreads(), ASYNC_EXECUTORS.getMaximumPoolSize());
             m_blobRowMap = new ConcurrentHashMap<>();
             m_semaphore = new Semaphore(m_nThreads);
             m_queue = new ArrayBlockingQueue<>(m_nThreads);
@@ -424,6 +433,12 @@ public class DataContainer implements RowAppender {
         } // for all cells
     }
 
+    /**
+     * Checks if any of the {@link ContainerDomainRunnable} threw an exception.
+     *
+     * @param waitForRunnables if set to {@code true} and an exception occured this call will block until all runnables
+     *            are finished
+     */
     private void checkAsyncWriteThrowable(final boolean waitForRunnables) {
         Throwable t = m_writeThrowable.get();
         if (t != null) {
@@ -432,7 +447,6 @@ public class DataContainer implements RowAppender {
                 try {
                     m_semaphore.acquire(m_nThreads);
                 } catch (InterruptedException ex) {
-                    // TODO Auto-generated catch block
                 }
             }
             StringBuilder error = new StringBuilder();
@@ -548,6 +562,7 @@ public class DataContainer implements RowAppender {
                 if (!m_batch.isEmpty()) {
                     submit();
                 }
+                // wait for all threads to stop
                 m_semaphore.acquire(m_nThreads);
             } catch (final InterruptedException ie) {
                 m_writeThrowable.compareAndSet(null, ie);
@@ -679,8 +694,13 @@ public class DataContainer implements RowAppender {
             m_batch.add(row);
             try {
                 if (MemoryAlertSystem.getInstance().isMemoryLow()) {
+                    // flush the buffer
                     m_buffer.flushBuffer();
+                    // write all keys to disk
+                    m_duplicateChecker.writeToDisk();
+                    // submit the pending batch
                     submit();
+                    // wait until all runnables are finished
                     m_semaphore.acquire(m_nThreads);
                     m_semaphore.release(m_nThreads);
                 } else {
@@ -688,8 +708,8 @@ public class DataContainer implements RowAppender {
                         submit();
                     }
                 }
-            } catch (final InterruptedException ie) {
-                m_writeThrowable.compareAndSet(null, ie);
+            } catch (final IOException | InterruptedException e) {
+                m_writeThrowable.compareAndSet(null, e);
             }
             checkAsyncWriteThrowable(true);
         }
@@ -697,17 +717,20 @@ public class DataContainer implements RowAppender {
     } // addRowToTable(DataRow)
 
     /**
-     * @param row
-     * @throws InterruptedException
+     * Submits the current batch to the {@link #ASYNC_EXECUTORS} service.
+     *
+     * @throws InterruptedException if an interrupted occured
      */
     private void submit() throws InterruptedException {
+        // wait until we are allowed to submit a new runnable
         m_semaphore.acquire();
+        // re-use an domainCreator if possible and submit the job
         IDataTableDomainCreator domainCreator = m_queue.poll();
         if (domainCreator == null) {
             domainCreator = new DataTableDomainCreator(m_spec, false);
         }
         ASYNC_EXECUTORS.execute(new ContainerDomainRunnable(this, domainCreator, m_batch, m_curBatch++));
-        //        ASYNC_EXECUTORS.execute(new ContainerRunnable(m_batch, m_curBatch++));
+        // reset batch
         m_batch = new ArrayList<>(m_batchSize);
     }
 
@@ -1119,27 +1142,42 @@ public class DataContainer implements RowAppender {
         return table instanceof ContainerTable;
     }
 
+    /**
+     * Implements a runnable that validates the row against the defined spec, tests for key duplicates, transforms a
+     * {@link DataRow} to a {@link BlobSupportDataRow} and finally forwards the rows, in proper order, to the buffer.
+     *
+     * @author Mark Ortmann, KNIME GmbH, Berlin, Germany
+     */
     private static final class ContainerDomainRunnable implements Runnable {
 
+        /** Weak reference to the container creating the runnable. */
         private final WeakReference<DataContainer> m_containerRef;
 
-        private final IDataTableDomainCreator m_dtdc;
+        /** The data table domain creator. */
+        private final IDataTableDomainCreator m_dataTableDomainCreator;
 
+        /** The batch of rows to be processed. */
         private final List<DataRow> m_rows;
 
+        /** The current batch index. */
         private final long m_batchIdx;
 
+        /**
+         * Constructor.
+         *
+         * @param container the container
+         * @param domainCreator the domain creator
+         * @param rows the batch of rows to be processed
+         * @param batchIdx the batch index
+         */
         ContainerDomainRunnable(final DataContainer container, final IDataTableDomainCreator domainCreator,
             final List<DataRow> rows, final long batchIdx) {
             m_containerRef = new WeakReference<>(container);
-            m_dtdc = domainCreator;
+            m_dataTableDomainCreator = domainCreator;
             m_rows = rows;
             m_batchIdx = batchIdx;
         }
 
-        /**
-         * {@inheritDoc}
-         */
         @Override
         public void run() {
             final DataContainer container = m_containerRef.get();
@@ -1148,7 +1186,7 @@ public class DataContainer implements RowAppender {
                     final List<BlobSupportDataRow> blobRows = new ArrayList<>(m_rows.size());
                     for (final DataRow row : m_rows) {
                         container.validateSpecCompatiblity(row);
-                        m_dtdc.updateDomain(row);
+                        m_dataTableDomainCreator.updateDomain(row);
                         container.addRowKeyForDuplicateCheck(row.getKey());
                         blobRows.add(container.m_buffer.saveBlobsAndFileStores(row, container.m_forceCopyOfBlobs));
                     }
@@ -1165,99 +1203,43 @@ public class DataContainer implements RowAppender {
                             addRows(container, container.m_blobRowMap.remove(container.m_pendingBatch.get()));
                         }
                     }
-                } catch (final IOException | DuplicateKeyException | DataContainerException
-                        | IllegalArgumentException | SecurityException e) {
+                } catch (final IOException | DuplicateKeyException | DataContainerException | IllegalArgumentException
+                        | SecurityException e) {
                     container.m_writeThrowable.compareAndSet(null, e);
                 } finally {
-                    container.m_queue.add(m_dtdc);
+                    container.m_queue.add(m_dataTableDomainCreator);
                     container.m_semaphore.release();
                 }
             } else if (container != null) {
-                container.m_queue.add(m_dtdc);
+                container.m_queue.add(m_dataTableDomainCreator);
                 container.m_semaphore.release();
             }
         }
 
-        private void addRows(final DataContainer container, final List<BlobSupportDataRow> blobRows)
+        /**
+         * Forwards the given list of {@link BlobSupportDataRow} to the buffer
+         *
+         * @param container the container holding the buffer
+         * @param blobRows the rows to be forwarded to the buffer
+         * @throws IOException - if the buffer cannot write the rows to disc
+         */
+        private static void addRows(final DataContainer container, final List<BlobSupportDataRow> blobRows)
             throws IOException {
             for (final BlobSupportDataRow row : blobRows) {
                 container.m_buffer.addBlobSupportDataRow(row);
             }
         }
 
-        private boolean hasEntry(final DataContainer container) {
+        /**
+         * Checks whether there is another batch of {@link BlobSupportDataRow} exists that has to be forwarded to the
+         * buffer.
+         *
+         * @param container the container holding the buffer
+         * @return {@code true} if another batch has to be forwarded to the buffer, {@code false} otherwise
+         */
+        private static boolean hasEntry(final DataContainer container) {
             synchronized (container.m_pendingBatch) {
                 return container.m_blobRowMap.containsKey(container.m_pendingBatch.incrementAndGet());
-            }
-        }
-
-    }
-
-    private final class ContainerRunnable implements Runnable {
-
-        private final WeakReference<Buffer> m_bufferRef;
-
-        private final List<DataRow> m_rows;
-
-        private final long m_batchIdx;
-
-        ContainerRunnable(final Buffer buffer, final List<DataRow> rows, final long batchIdx) {
-            m_bufferRef = new WeakReference<Buffer>(buffer);
-            m_rows = rows;
-            m_batchIdx = batchIdx;
-        }
-
-        /**
-         * {@inheritDoc}
-         */
-        @Override
-        public void run() {
-            final Buffer buffer;
-            if (m_writeThrowable.get() == null && ((buffer = m_bufferRef.get()) != null)) {
-                try {
-                    final List<BlobSupportDataRow> blobRows = new ArrayList<>(m_rows.size());
-                    for (final DataRow row : m_rows) {
-                        validateSpecCompatiblity(row);
-                        updateDomain(row);
-                        addRowKeyForDuplicateCheck(row.getKey());
-                        blobRows.add(buffer.saveBlobsAndFileStores(row, m_forceCopyOfBlobs));
-                    }
-                    boolean addRows;
-                    synchronized (m_pendingBatch) {
-                        addRows = m_batchIdx == m_pendingBatch.get();
-                        if (!addRows) {
-                            m_blobRowMap.put(m_batchIdx, blobRows);
-                        }
-                    }
-                    if (addRows) {
-                        addRows(buffer, blobRows);
-                        while (hasEntry()) {
-                            addRows(buffer, m_blobRowMap.remove(m_pendingBatch.get()));
-                        }
-                    }
-                } catch (final IOException ioe) {
-                    m_writeThrowable.compareAndSet(null, ioe);
-                } finally {
-                    m_semaphore.release();
-                }
-            } else {
-                m_semaphore.release();
-            }
-        }
-
-        /**
-         * @param blobRows
-         * @throws IOException
-         */
-        private void addRows(final Buffer buffer, final List<BlobSupportDataRow> blobRows) throws IOException {
-            for (final BlobSupportDataRow row : blobRows) {
-                buffer.addBlobSupportDataRow(row);
-            }
-        }
-
-        private boolean hasEntry() {
-            synchronized (m_pendingBatch) {
-                return m_blobRowMap.containsKey(m_pendingBatch.incrementAndGet());
             }
         }
 
