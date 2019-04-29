@@ -580,7 +580,7 @@ public final class DataContainerSettings {
     }
 
     private static int initContainerThreads() {
-        return 4;
+        return Platform.ARCH_X86.equals(Platform.getOSArch()) ? 10 : 50;
     }
 
     /**
