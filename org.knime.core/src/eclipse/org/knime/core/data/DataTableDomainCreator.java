@@ -206,13 +206,15 @@ public class DataTableDomainCreator implements IDataTableDomainCreator {
     private void updateMinMax(final int col, final DataCell cell, final DataCell[] mins, final DataCell[] maxs,
         final DataValueComparator[] comparators) {
         final boolean isMissing = cell.isMissing();
-        if (mins[col] == null || isMissing) {
-            return;
-        }
+
         if (!isMissing && m_possVals[col] != null) {
             if (m_possVals[col].add(cell) && (m_possVals[col].size() > m_maxPossibleValues)) {
                 m_possVals[col] = null;
             }
+        }
+        
+        if (mins[col] == null || isMissing) {
+            return;
         }
 
         final DataCell unwrapped = (cell instanceof BlobWrapperDataCell) ? ((BlobWrapperDataCell)cell).getCell() : cell;

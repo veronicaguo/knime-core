@@ -498,6 +498,16 @@ public class Buffer implements KNIMEStreamConstants {
     private final Object m_writerLock;
 
     /**
+     * Lock ensuring that {@link #ensureBlobDirExists()} does not initialized everything several times due to racing
+     * condition. Note that {@link #ensureBlobDirExists()} is only called if
+     * {@link #getBlobFile(int, int, boolean, boolean)} has create path set to {@code true} which is only the case if
+     * {@link #writeBlobDataCell(BlobDataCell, BlobAddress)} is called via
+     * {@link #handleIncomingBlob(DataCell, int, int, boolean, boolean, boolean, boolean)}, i.e. the object is only
+     * required for writing buffers.
+     */
+    private final Object m_blobDirLock;
+
+    /**
      * Lock ensuren that {@link #ensureTempFileExists()} does not create a deadlock, when
      * {@link #handleIncomingBlob(DataCell, int, int, boolean, boolean, boolean, boolean)} and {@link #flushBuffer()}
      * are called by different threads at the same time.
@@ -605,6 +615,7 @@ public class Buffer implements KNIMEStreamConstants {
         m_indicesLock = new Object();
         m_writerLock = new Object();
         m_tmpFileLock = new Object();
+        m_blobDirLock = new Object();
         BufferTracker.getInstance().bufferCreated(this);
     }
 
@@ -677,6 +688,7 @@ public class Buffer implements KNIMEStreamConstants {
         m_tmpFileLock= new Object();
         m_indicesLock = null;
         m_writerLock = null;
+        m_blobDirLock = null;
         BufferTracker.getInstance().bufferCreated(this);
     }
 
@@ -1444,13 +1456,15 @@ public class Buffer implements KNIMEStreamConstants {
     }
 
     private void ensureBlobDirExists() throws IOException {
-        if (m_blobDir == null) {
-            ensureTempFileExists();
-            File blobDir = createBlobDirNameForTemp(m_binFile);
-            if (!blobDir.mkdir()) {
-                throw new IOException("Unable to create temp directory " + blobDir.getAbsolutePath());
+        synchronized (m_blobDirLock) {
+            if (m_blobDir == null) {
+                ensureTempFileExists();
+                File blobDir = createBlobDirNameForTemp(m_binFile);
+                if (!blobDir.mkdir()) {
+                    throw new IOException("Unable to create temp directory " + blobDir.getAbsolutePath());
+                }
+                m_blobDir = blobDir;
             }
-            m_blobDir = blobDir;
         }
     }
 
@@ -1516,8 +1530,10 @@ public class Buffer implements KNIMEStreamConstants {
         }
         File blobDir = new File(m_blobDir, childPath.toString());
         if (createPath) {
-            if (!blobDir.exists() && !blobDir.mkdirs()) {
-                throw new IOException("Unable to create directory " + blobDir.getAbsolutePath());
+            synchronized (m_blobDirLock) {
+                if (!blobDir.mkdirs() && !blobDir.exists()) {
+                    throw new IOException("Unable to create directory " + blobDir.getAbsolutePath());
+                }
             }
         } else {
             if (!blobDir.exists()) {
