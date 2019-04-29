@@ -728,6 +728,7 @@ public class DataContainer implements RowAppender {
         IDataTableDomainCreator domainCreator = m_queue.poll();
         if (domainCreator == null) {
             domainCreator = new DataTableDomainCreator(m_spec, false);
+            domainCreator.setMaxPossibleValues(m_domainCreator.getMaxPossibleVals());
         }
         ASYNC_EXECUTORS.execute(new ContainerDomainRunnable(this, domainCreator, m_batch, m_curBatch++));
         // reset batch
