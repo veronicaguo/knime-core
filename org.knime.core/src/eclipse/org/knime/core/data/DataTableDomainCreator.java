@@ -55,6 +55,7 @@ import org.knime.core.data.container.DataContainerSettings;
 import org.knime.core.node.BufferedDataTable;
 import org.knime.core.node.CanceledExecutionException;
 import org.knime.core.node.ExecutionMonitor;
+import org.knime.core.node.util.CheckUtils;
 
 /**
  * Create or recreate domain of a data table. The original spec has to be given in the constructor. The possible values
@@ -279,6 +280,11 @@ public class DataTableDomainCreator implements IDataTableDomainCreator {
     }
 
     @Override
+    public DataTableSpec getInputSpec() {
+        return m_inputSpec;
+    }
+
+    @Override
     public void updateDomain(final DataRow row) {
         assert row.getNumCells() == m_inputSpec.getNumColumns() : "Unequal number of columns in spec and row: "
             + m_inputSpec.getNumColumns() + " vs. " + row.getNumCells();
@@ -373,15 +379,24 @@ public class DataTableDomainCreator implements IDataTableDomainCreator {
     }
 
     @Override
+    public int getMaxPossibleVals() {
+        return m_maxPossibleValues;
+    }
+
+    @Override
     public Iterable<DataCell>[] getPossibleVals() {
         return m_possVals;
     }
 
     @Override
-    public void merge(final IDataTableDomainCreator dtdc) {
-        final DataCell[] dtdcMin = dtdc.getMin();
-        final DataCell[] dtdcMax = dtdc.getMax();
-        final Iterable<DataCell>[] dtdcPossVals = dtdc.getPossibleVals();
+    public void merge(final IDataTableDomainCreator dataTableDomainCreator) {
+        CheckUtils.checkArgument(!getInputSpec().equals(dataTableDomainCreator.getInputSpec()),
+            "Cannot merge data table domain creators based on different table specs");
+        CheckUtils.checkArgument(getMaxPossibleVals() != dataTableDomainCreator.getMaxPossibleVals(),
+            "Cannot merge data table domain creators using a different number of unique values");
+        final DataCell[] dtdcMin = dataTableDomainCreator.getMin();
+        final DataCell[] dtdcMax = dataTableDomainCreator.getMax();
+        final Iterable<DataCell>[] dtdcPossVals = dataTableDomainCreator.getPossibleVals();
         for (int i = 0; i < m_possVals.length; i++) {
             if (dtdcPossVals[i] != null) {
                 for (final DataCell c : dtdcPossVals[i]) {

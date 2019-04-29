@@ -57,6 +57,12 @@ package org.knime.core.data;
 public interface IDataTableDomainCreator {
 
     /**
+     * Returns the input domain.
+     *
+     * @return the input table spec
+     */
+    DataTableSpec getInputSpec();
+    /**
      * Updates the domain values with a single row. Note that the row structure must match the table spec that has been
      * provided to the constructor.
      *
@@ -91,6 +97,13 @@ public interface IDataTableDomainCreator {
      * @return the maxima for each individual column
      */
     DataCell[] getMax();
+
+    /**
+     * Returns the maximum number of possible unique values.
+     *
+     * @return the maximum number of possible unique values
+     */
+    int getMaxPossibleVals();
 
     /**
      * Returns an array storing the possible values for each column.

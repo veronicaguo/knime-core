@@ -200,6 +200,19 @@ public final class DataContainerSettingsTest extends TestCase {
             public void merge(final IDataTableDomainCreator dtdc) {
             }
 
+            @Override
+            public DataTableSpec getInputSpec() {
+                return null;
+            }
+
+            /**
+             * {@inheritDoc}
+             */
+            @Override
+            public int getMaxPossibleVals() {
+                return 0;
+            }
+
         }
 
         class UnitDuplicateChecker implements ThreadSafeDuplicateChecker {
