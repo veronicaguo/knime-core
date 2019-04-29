@@ -781,7 +781,7 @@ public class DataContainer implements RowAppender {
      *            internal {@link DuplicateChecker} instance.
      * @throws DataContainerException This implementation may throw a <code>DataContainerException</code> when
      *             {@link DuplicateChecker#addKey(String)} throws an {@link IOException}.
-     * @throws DuplicateKeyException If a duplicate is encountered. TODO: remove synchronized
+     * @throws DuplicateKeyException If a duplicate is encountered.
      */
     protected void addRowKeyForDuplicateCheck(final RowKey key) {
         //        synchronized (m_duplicateChecker) {
@@ -796,12 +796,6 @@ public class DataContainer implements RowAppender {
                 dke.getKey());
         }
         //        }
-    }
-
-    private void updateDomain(final DataRow row) {
-        synchronized (m_domainCreator) {
-            m_domainCreator.updateDomain(row);
-        }
     }
 
     /**
